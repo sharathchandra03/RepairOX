@@ -36,6 +36,7 @@ import { allow, CAP } from "@/lib/capabilities";
 import {
   followUpLifecycle, followUpStateTone, openFollowUp,
   type Lead, type LeadFollowUp,
+  isCallBackStatus,
 } from "@/lib/leads-data";
 import { LeadFollowUpCell, LeadStatusCell } from "@/components/leads/lead-followup-cell";
 import { formatClock, formatHHmm } from "@/lib/time-format";
@@ -66,6 +67,8 @@ export function LeadFollowUpView({
   theadTop,
   onOpenLead,
   highlightLeadId,
+  renderActions,
+  renderDevice,
 }: {
   /** The already-scoped + store-filtered lead set the page is showing. */
   leads: Lead[];
@@ -76,6 +79,11 @@ export function LeadFollowUpView({
   /** When set (e.g. from the follow-up bell's "Open Lead"), the matching row is
    *  scrolled into view and blinks for ~3s so the agent sees which lead. */
   highlightLeadId?: string | null;
+  /** The SAME row actions as the Lead Table (pin, view, edit, route, quotation, delete…).
+   *  Supplied by the page so every action runs through its one handler. */
+  renderActions?: (lead: Lead) => import("react").ReactNode;
+  /** The SAME boxed Device & Issue card as the Lead Table (opens the device details popup). */
+  renderDevice?: (lead: Lead) => import("react").ReactNode;
 }) {
   const { followUps } = useLeads();
   const [view, setView] = useState<ViewMode>("table");
@@ -88,9 +96,50 @@ export function LeadFollowUpView({
   }, [leads]);
 
   // Only follow-ups that belong to a lead the user can currently see.
-  const visibleFollowUps = useMemo(
+  const scopedFollowUps = useMemo(
     () => followUps.filter((f) => leadById.has(f.leadId)),
     [followUps, leadById],
+  );
+  // Type filter: a Call Back is a kind of follow-up. The type comes from the
+  // lead's current stage (isCallBackStatus), so agents can tell them apart.
+  const [kind, setKind] = useState<"all" | "followup" | "callback">("all");
+  // The type counts follow the tab you are on, so they always add up to what the
+  // table shows: Active = leads with a scheduled follow-up; History = closed
+  // follow-ups (one per follow-up).
+  const kindCounts = useMemo(() => {
+    let cb = 0; let fu = 0;
+    const seen = new Set<string>();
+    for (const f of scopedFollowUps) {
+      const lead = leadById.get(f.leadId);
+      if (!lead) continue;
+      const isCb = isCallBackStatus(lead.status);
+      if (sub === "active") {
+        if (f.status !== "scheduled" || seen.has(f.leadId)) continue;
+        seen.add(f.leadId);
+      } else if (!(f.status === "completed" || f.status === "cancelled" || f.status === "missed")) continue;
+      if (isCb) cb += 1; else fu += 1;
+    }
+    return { all: cb + fu, followup: fu, callback: cb };
+  }, [scopedFollowUps, leadById, sub]);
+  const visibleFollowUps = useMemo(
+    () => kind === "all" ? scopedFollowUps : scopedFollowUps.filter((f) => {
+      const lead = leadById.get(f.leadId);
+      return (lead ? isCallBackStatus(lead.status) : false) === (kind === "callback");
+    }),
+    [scopedFollowUps, leadById, kind],
+  );
+  const typeSwitch = (
+    <SegmentedTabs
+      accent="amber"
+      value={kind}
+      onChange={(v) => setKind(v as typeof kind)}
+      options={[
+        { label: <span className="inline-flex items-center">All ({kindCounts.all})</span>, value: "all" },
+        { label: <span className="inline-flex items-center">Follow-up ({kindCounts.followup})</span>, value: "followup" },
+        { label: <span className="inline-flex items-center">Call Back ({kindCounts.callback})</span>, value: "callback" },
+      ]}
+      size="sm"
+    />
   );
 
   const viewSwitch = (
@@ -107,10 +156,12 @@ export function LeadFollowUpView({
   );
 
   return (
-    <div className="space-y-3">
+    <div className={cn("space-y-3", view === "table" && "rox-lock-fill")}>
       {/* Table / Calendar switch — amber theme. In Table mode it shares ONE row
           with the Active / History toggle (rendered inside FollowUpTable). */}
-      {view === "calendar" && viewSwitch}
+      {view === "calendar" && (
+        <div className="flex flex-wrap items-center gap-3">{viewSwitch}{typeSwitch}</div>
+      )}
 
       {view === "table" ? (
         <FollowUpTable
@@ -119,10 +170,12 @@ export function LeadFollowUpView({
           followUps={visibleFollowUps}
           sub={sub}
           onSubChange={setSub}
-          leading={viewSwitch}
+          leading={<>{viewSwitch}{typeSwitch}</>}
           theadTop={theadTop}
           onOpenLead={onOpenLead}
           highlightLeadId={highlightLeadId}
+          renderActions={renderActions}
+          renderDevice={renderDevice}
         />
       ) : (
         <FollowUpCalendar followUps={visibleFollowUps} leadById={leadById} onOpenLead={onOpenLead} />
@@ -134,7 +187,7 @@ export function LeadFollowUpView({
 /* ── Active / History table ──────────────────────────────────────────────── */
 
 function FollowUpTable({
-  leads, leadById, followUps, sub, onSubChange, leading, theadTop, onOpenLead, highlightLeadId,
+  leads, leadById, followUps, sub, onSubChange, leading, theadTop, onOpenLead, highlightLeadId, renderActions, renderDevice,
 }: {
   /** Table / Calendar switch, rendered beside the Active / History toggle. */
   leading?: import("react").ReactNode;
@@ -146,6 +199,9 @@ function FollowUpTable({
   theadTop?: number;
   onOpenLead: (lead: Lead) => void;
   highlightLeadId?: string | null;
+  renderActions?: (lead: Lead) => import("react").ReactNode;
+  /** The SAME boxed Device & Issue card as the Lead Table (opens the device details popup). */
+  renderDevice?: (lead: Lead) => import("react").ReactNode;
 }) {
   // Group follow-ups per lead.
   const byLead = useMemo(() => {
@@ -158,8 +214,13 @@ function FollowUpTable({
   }, [followUps]);
 
   // ACTIVE = leads with an open (scheduled) follow-up, ordered overdue → due →
-  // upcoming (nearest due first). HISTORY = leads with follow-up records but no
-  // open one (latest is completed/cancelled).
+  // upcoming (nearest due first).
+  // HISTORY = EVERY follow-up that has been CLOSED (outcome recorded =
+  // completed, or cancelled / missed), one row per follow-up record — so a
+  // follow-up that got an outcome lands here immediately even when the lead
+  // already has its next follow-up scheduled (that one stays in Active). Newest
+  // CLOSED first: the follow-up whose outcome was recorded last is on top, no
+  // matter how old the follow-up itself is.
   const { activeRows, historyRows } = useMemo(() => {
     const active: { lead: Lead; open: LeadFollowUp }[] = [];
     const history: { lead: Lead; last: LeadFollowUp }[] = [];
@@ -167,18 +228,19 @@ function FollowUpTable({
       const lead = leadById.get(leadId);
       if (!lead) continue;
       const open = openFollowUp(list);
-      if (open) {
-        active.push({ lead, open });
-      } else {
-        const last = [...list].sort((a, b) => new Date(b.dueAt).getTime() - new Date(a.dueAt).getTime())[0];
-        if (last) history.push({ lead, last });
+      if (open) active.push({ lead, open });
+      for (const f of list) {
+        if (f.status === "completed" || f.status === "cancelled" || f.status === "missed") history.push({ lead, last: f });
       }
     }
+    const closedAt = (f: LeadFollowUp) => {
+      const t = new Date(f.completedAt || f.dueAt).getTime();
+      return Number.isNaN(t) ? 0 : t;
+    };
     active.sort((a, b) => new Date(a.open.dueAt).getTime() - new Date(b.open.dueAt).getTime());
-    history.sort((a, b) => new Date(b.last.completedAt || b.last.dueAt).getTime() - new Date(a.last.completedAt || a.last.dueAt).getTime());
+    history.sort((a, b) => closedAt(b.last) - closedAt(a.last) || b.last.seq - a.last.seq);
     return { activeRows: active, historyRows: history };
   }, [byLead, leadById]);
-
   const rows = sub === "active" ? activeRows : historyRows;
 
   const [page, setPage] = useState(1);
@@ -186,6 +248,25 @@ function FollowUpTable({
   const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   useEffect(() => { setPage(1); }, [sub, rows.length]);
+  /* Agent column: one shared block width (avatar + the LONGEST visible name) so
+     every avatar lines up in a column AND the whole block is centred under the
+     heading. Approximate glyph width at 13px; capped to the column by max-w-full. */
+  const agentBlockPx = useMemo(() => {
+    // Measure the real rendered width (13px body font) of the longest name.
+    let ctx: CanvasRenderingContext2D | null = null;
+    if (typeof document !== "undefined") {
+      ctx = document.createElement("canvas").getContext("2d");
+      if (ctx) ctx.font = `400 13px ${getComputedStyle(document.body).fontFamily || "system-ui, sans-serif"}`;
+    }
+    let widest = 0;
+    for (const r of rows) {
+      const f = "open" in r ? r.open : r.last;
+      const n = f.followUpUserName || r.lead.assignedToName || "—";
+      const w = ctx ? ctx.measureText(n).width : n.length * 7;
+      if (w > widest) widest = w;
+    }
+    return Math.ceil(22 + 8 + widest) + 2; // avatar + gap + text
+  }, [rows]);
   const paged = useMemo(() => rows.slice((currentPage - 1) * pageSize, currentPage * pageSize), [rows, currentPage, pageSize]);
 
   /* ── Highlight a lead's row (from the follow-up bell's "Open Lead") ──
@@ -213,19 +294,27 @@ function FollowUpTable({
   }, [highlightLeadId, sub, activeRows, rows, pageSize, currentPage, onSubChange]);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 rox-lock-fill">
       {/* Active / History sub-toggle — same pill group as Walk-In. */}
       <div className="flex flex-wrap items-center gap-3">
       {leading}
-      <div className="flex items-center gap-1 rounded-full border border-[#F59E0C]/70 bg-muted p-1 w-fit">
-        <SubTab label="Active" count={activeRows.length} active={sub === "active"} onClick={() => onSubChange("active")} icon={CalendarClock} />
-        <SubTab label="History" count={historyRows.length} active={sub === "history"} onClick={() => onSubChange("history")} icon={HistoryIcon} />
-      </div>
+      <SegmentedTabs
+        accent="amber"
+        value={sub}
+        onChange={(v) => onSubChange(v as SubMode)}
+        options={[
+          { label: <span className="inline-flex items-center gap-1.5"><CalendarClock className="h-3.5 w-3.5" /> Active ({activeRows.length})</span>, value: "active" },
+          { label: <span className="inline-flex items-center gap-1.5"><HistoryIcon className="h-3.5 w-3.5" /> History ({historyRows.length} {historyRows.length === 1 ? "follow-up" : "follow-ups"})</span>, value: "history" },
+        ]}
+        size="sm"
+      />
       </div>
 
       {/* Canonical RepairOX table shell (matches the main Lead / Walk-In table). */}
-      <div className="border-2 border-zinc-300 bg-card shadow-card">
-        <div className="[overflow-x:clip]">
+      {/* LOCKED page: the controls above stay fixed; only this frame's body scrolls
+          (sticky header at top:0 inside the scroller). Pure CSS — see .rox-lock-*. */}
+      <div className="rox-lock-grow flex flex-col border-2 border-zinc-300 bg-card shadow-card">
+        <div className="rox-grid-scroll min-h-0 flex-1 overflow-auto">
           <table className="w-full table-fixed text-[14px]">
             {/* Width strategy: ALL columns are percentage-based and sum to
                 100%, so every column scales proportionally together. This
@@ -234,27 +323,27 @@ function FollowUpTable({
                 instead of dumping into a couple of text columns and leaving
                 huge gaps around Agent / Status / Action. */}
             <colgroup>
-              <col className="w-[8%]" />{/* Date (lead created) */}
+              <col className="w-[7%]" />{/* Date (lead created) */}
               <col className="w-[6%]" />{/* Lead ID */}
               <col className="w-[15%]" />{/* Customer (name + number) */}
               <col className="w-[14%]" />{/* Device & Issue */}
-              <col className="w-[15%]" />{/* Follow-Up (interactive pill, two-line) */}
-              <col className="w-[14%]" />{/* Comments (combined) */}
-              <col className="w-[12%]" />{/* Agent */}
-              <col className="w-[11%]" />{/* Status (interactive) */}
-              <col className="w-[5%]" />{/* Action */}
+              <col className="w-[14%]" />{/* Follow-Up (interactive pill, two-line) */}
+              <col className="w-[11%]" />{/* Comments (combined) */}
+              <col className="w-[11%]" />{/* Agent */}
+              <col className="w-[12%]" />{/* Status (interactive) */}
+              <col className="w-[10%]" />{/* Action */}
             </colgroup>
-            <thead style={theadTop != null ? { top: theadTop } : undefined} className="sticky z-[5] bg-[#5368D4] border-b-2 border-white/35">
+            <thead style={{ top: 0 }} className="sticky z-[5] bg-[#5368D4] border-b-2 border-white/35">
               <tr className="text-left text-[12px] font-bold uppercase tracking-wider text-white">
                 <th className="py-4"><span className="inline-block pl-5">Date</span></th>
                 <th className="pl-[41px] py-4">Lead</th>
-                <th className="pl-[100px] py-4">Customer</th>
+                <th className="pl-[75px] py-4">Customer</th>
                 <th className="px-4 py-4 text-center">Device &amp; Issue</th>
-                <th className="py-4 text-center">Follow-Up</th>
+                <th className="py-4 text-center"><span className="inline-block -translate-x-[15px]">Follow-Up</span></th>
                 <th className="py-4 text-center">Comments</th>
                 <th className="py-4 text-center">Agent</th>
                 <th className="py-4 text-center">Status</th>
-                <th className="py-4 pr-3 text-right">Action</th>
+                <th className="py-4 pr-3 text-right">Last Action</th>
               </tr>
             </thead>
             <tbody>
@@ -262,7 +351,7 @@ function FollowUpTable({
                 const fu = sub === "active" ? (rest as { open: LeadFollowUp }).open : (rest as { last: LeadFollowUp }).last;
                 return (
                   <motion.tr
-                    key={lead.id}
+                    key={sub === "history" ? fu.id : lead.id}
                     ref={(el) => { if (el) rowRefs.current.set(lead.id, el as HTMLTableRowElement); else rowRefs.current.delete(lead.id); }}
                     initial={{ opacity: 0, y: 3 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -283,46 +372,53 @@ function FollowUpTable({
                     </td>
                     {/* CUSTOMER — name + contact number stacked (like the Lead
                         Table). Whole column nudged right to sit under its heading. */}
-                    <td className="pl-[100px] py-4 pr-4">
+                    <td className="pl-[75px] py-4 pr-1">
                       <div className="min-w-0 leading-snug">
                         <span className="block truncate text-[14px] font-medium">{lead.name || "—"}</span>
                         {lead.number ? <span className="mt-0.5 block truncate text-[12.5px] text-zinc-500 tabular-nums">{lead.number}</span> : null}
                       </div>
                     </td>
                     {/* DEVICE & ISSUE — heading + content both centered in the column. */}
-                    <td className="px-4 py-4 text-[13px] text-center">
-                      <div className="min-w-0">
-                        <span className="block truncate font-medium text-foreground">{lead.device || "—"}</span>
-                        {lead.issue ? <span className="mt-0.5 block truncate text-[12px] text-muted-foreground" title={lead.issue}>{lead.issue}</span> : null}
-                      </div>
+                    <td className="px-1.5 py-3" onClick={(e) => e.stopPropagation()}>
+                      {renderDevice ? <div className="mx-auto w-[92%] min-w-0">{renderDevice(lead)}</div> : (
+                        <div className="min-w-0 text-center text-[13px]">
+                          <span className="block truncate font-medium text-foreground">{lead.device || "—"}</span>
+                          {lead.issue ? <span className="mt-0.5 block truncate text-[12px] text-muted-foreground" title={lead.issue}>{lead.issue}</span> : null}
+                        </div>
+                      )}
                     </td>
                     {/* FOLLOW-UP — interactive pill + popover (mirrors Walk-In),
                         centered in its column.
                         In Active it manages the open follow-up; in History it
                         shows the last outcome and still lets you view history /
                         schedule the next. */}
-                    <td className="px-3 py-4" onClick={(e) => e.stopPropagation()}>
+                    <td className="px-1.5 py-4" onClick={(e) => e.stopPropagation()}>
+                      <div className="-translate-x-[15px]">
                       {sub === "history" ? (
-                        <div className="flex flex-col items-center gap-1">
-                          <span className="truncate text-[12px] font-medium text-emerald-700">#{fu.seq} · {fu.outcome || followUpLifecycle(fu)}</span>
-                          <LeadFollowUpCell lead={lead} onOpenLead={onOpenLead} />
+                        <div className="flex flex-col items-center gap-1" title={`Follow-up #${fu.seq} · ${fu.outcome || followUpLifecycle(fu)} · closed ${fmtDateTime(fu.completedAt || fu.dueAt)}`}>
+                          <span className={cn(
+                            "inline-flex max-w-full items-center truncate rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset",
+                            fu.status === "completed" ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-zinc-50 text-zinc-600 ring-zinc-200",
+                          )}>#{fu.seq} · {fu.outcome || followUpLifecycle(fu)}</span>
+                          <span className="text-[11px] text-muted-foreground tabular-nums">{fmtDateTime(fu.completedAt || fu.dueAt)}</span>
                         </div>
                       ) : (
                         <div className="flex justify-center">
                           <LeadFollowUpCell lead={lead} onOpenLead={onOpenLead} />
                         </div>
                       )}
+                      </div>
                     </td>
                     {/* COMMENTS — combined lead + follow-up comment thread. */}
-                    <td className="pl-4 py-3 pr-4" onClick={(e) => e.stopPropagation()}>
+                    <td className="pl-2 py-3 pr-2" onClick={(e) => e.stopPropagation()}>
                       <FollowUpCommentCell lead={lead} />
                     </td>
                     {/* AGENT — the follow-up's responsible agent, centered under
                         its (centered) heading. */}
                     <td className="px-3 py-4">
-                      <div className="flex min-w-0 items-center justify-center gap-2">
-                        <Avatar name={fu.followUpUserName || lead.assignedToName || "—"} size={22} />
-                        <span className="truncate text-[13px]">{fu.followUpUserName || lead.assignedToName || "—"}</span>
+                      <div className="mx-auto flex min-w-0 max-w-[calc(100%-19px)] items-center justify-start gap-2 translate-x-[19px]" style={{ width: agentBlockPx }}>
+                        <span className="shrink-0"><Avatar name={fu.followUpUserName || lead.assignedToName || "—"} size={22} /></span>
+                        <span className="line-clamp-2 min-w-0 break-words text-[13px] leading-tight" title={fu.followUpUserName || lead.assignedToName || undefined}>{fu.followUpUserName || lead.assignedToName || "—"}</span>
                       </div>
                     </td>
                     {/* STATUS — interactive lifecycle dropdown, centered under
@@ -332,8 +428,9 @@ function FollowUpTable({
                         <LeadStatusCell lead={lead} />
                       </div>
                     </td>
-                    <td className="pl-4 pr-5 py-4" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center justify-end">
+                    <td className="pl-2 pr-3 py-4" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-end [&>div]:gap-0">
+                        {renderActions ? renderActions(lead) : (
                         <button
                           onClick={() => onOpenLead(lead)}
                           title="View lead"
@@ -342,6 +439,7 @@ function FollowUpTable({
                         >
                           <Eye className="h-4 w-4" />
                         </button>
+                        )}
                       </div>
                     </td>
                   </motion.tr>
@@ -374,7 +472,8 @@ function FollowUpTable({
           pageSize={pageSize}
           pageSizeOptions={PAGE_SIZE_OPTIONS}
           onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
-          itemLabel="lead"
+          itemLabel="follow-up"
+          className="rox-lock-footer -mt-3 !py-0"
         />
       )}
     </div>

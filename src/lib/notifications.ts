@@ -62,6 +62,8 @@ export type NotificationKind =
   | "lead_handoff_requested"
   | "lead_handoff_approved"
   | "lead_handoff_declined"
+  /* Lead Conversation: a teammate on the lead (Sales / Field Manager / Ninja) sent a message. */
+  | "lead_message"
   /* Security: an employee signed in on a device (owner-facing alert). */
   | "employee_login"
   | "generic";

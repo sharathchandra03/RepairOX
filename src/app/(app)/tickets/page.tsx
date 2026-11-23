@@ -78,10 +78,9 @@ const DATE_RANGES = [
   { label: "All", value: "all" },
   { label: "Today", value: "today" },
   { label: "Yesterday", value: "yesterday" },
-  { label: "7 Days", value: "7days" },
-  { label: "1 Month", value: "1month" },
+  { label: "This Month", value: "thismonth" },
   { label: "Last Month", value: "lastmonth" },
-  { label: "1 Year", value: "1year" },
+  { label: "This Year", value: "thisyear" },
   { label: "Custom", value: "custom" },
 ] as const;
 
@@ -250,7 +249,7 @@ export default function TicketsPage() {
       return;
     }
     // Deep-link filter context (e.g. from the Dashboard "Critical Tasks" card:
-    // /tickets?priority=critical_high&dateRange=1month). Only apply params that
+    // /tickets?priority=critical_high&dateRange=thismonth). Only apply params that
     // are actually present so direct visits keep their defaults.
     const priority = searchParams.get("priority");
     const status = searchParams.get("status");
@@ -268,7 +267,7 @@ export default function TicketsPage() {
 
       if (inheritedDate) {
         // Inherit the dashboard's exact date window (composition, not override).
-        setDateRange(inheritedDate.preset);
+        setDateRange(inheritedDate.preset === "7days" ? "all" : inheritedDate.preset);
         if (inheritedDate.preset === "custom") {
           setCustomFrom(inheritedDate.from ?? "");
           setCustomTo(inheritedDate.to ?? "");

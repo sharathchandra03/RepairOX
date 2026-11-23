@@ -334,7 +334,7 @@ function RouteInner({ lead, onClose }: { lead: Lead; onClose: () => void }) {
               <Row k="Customer" v={`${lead.name || "—"} · ${lead.number || ""}`} />
               <Row k="Route" v={`${routeLabel}${route === "PICKUP_DROP" ? ` · ${FIELD_LEAD_TYPES.find((t) => t.value === tripType)?.label}` : ""}`} />
               <Row k={route === "ON_SITE" ? "Service location" : "Pickup from"} v={`${loc.address}${loc.pincode ? ` – ${loc.pincode}` : ""}`} wide />
-              <Row k="Map" v={loc.lat != null ? `Pinned (${loc.lat.toFixed(4)}, ${loc.lng!.toFixed(4)})` : loc.mapsUrl ? "Link saved (no coordinates)" : "Not provided"} />
+              <Row k="Map" v={loc.mapsUrl ? loc.mapsUrl : loc.lat != null ? "Pinned on map" : "Not provided"} />
               <Row k="Scheduled" v={date ? `${date}${time ? ` ${time}` : ""}${window_ ? ` · ${window_}` : ""}` : "To be scheduled"} />
               <Row k="Operational store" v={stores.find((s) => s.id === opStoreId)?.name || "—"} />
               <Row k="Field Engineer" v={engineers.find((m) => m.id === engineerId)?.name || "Field Manager will assign"} />

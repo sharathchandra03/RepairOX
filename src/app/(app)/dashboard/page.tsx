@@ -92,7 +92,7 @@ export default function Dashboard() {
   // report opens with the SAME range the owner was looking at (not silently
   // reset to Today). Read once on mount via a lazy initializer.
   const searchParams = useSearchParams();
-  const [dateRange, setDateRange] = useState<"today" | "yesterday" | "7days" | "this_month" | "last_month" | "this_year" | "all" | "custom">(() => {
+  const [dateRange, setDateRange] = useState<"today" | "yesterday" | "7days" | "thismonth" | "last_month" | "thisyear" | "all" | "custom">(() => {
     const raw = searchParams.get("dateRange");
     // Incoming param may use either the dashboard vocabulary (this_month /
     // last_month) or the shared list vocabulary (1month / lastmonth / 7days /
@@ -104,17 +104,17 @@ export default function Dashboard() {
         case "yesterday": return "yesterday";
         case "7days": return "7days";
         case "this_month":
-        case "1month": return "this_month";
+        case "thismonth": return "thismonth";
         case "last_month":
         case "lastmonth": return "last_month";
         case "this_year":
-        case "1year": return "this_year";
+        case "thisyear": return "thisyear";
         case "all": return "all";
         case "custom": return "custom";
         default: return null;
       }
     };
-    return (normalise(raw) ?? "today") as "today" | "yesterday" | "7days" | "this_month" | "last_month" | "this_year" | "all" | "custom";
+    return (normalise(raw) ?? "today") as "today" | "yesterday" | "7days" | "thismonth" | "last_month" | "thisyear" | "all" | "custom";
   });
   const [customRange, setCustomRange] = useState<DateRange>(() => {
     if (searchParams.get("dateRange") === "custom") {
@@ -204,9 +204,9 @@ export default function Dashboard() {
       case "today": return "Today";
       case "yesterday": return "Yesterday";
       case "7days": return "7 Days";
-      case "this_month": return "This Month";
+      case "thismonth": return "This Month";
       case "last_month": return "Last Month";
-      case "this_year": return "This Year";
+      case "thisyear": return "This Year";
       case "all": return "All";
       case "custom": {
         if (customRange.start && customRange.end) {
@@ -434,7 +434,8 @@ export default function Dashboard() {
         days = 7;
         break;
       }
-      case "this_month": {
+      case "thismonth": {
+        // Calendar month to date — same window as isInListDateRange("thismonth").
         start = new Date(n.getFullYear(), n.getMonth(), 1);
         days = Math.max(1, n.getDate());
         break;
@@ -447,7 +448,8 @@ export default function Dashboard() {
         days = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86_400_000));
         break;
       }
-      case "this_year": {
+      case "thisyear": {
+        // Calendar year to date — same window as isInListDateRange("thisyear").
         start = new Date(n.getFullYear(), 0, 1);
         days = Math.max(1, Math.ceil((n.getTime() - start.getTime()) / 86_400_000));
         break;
@@ -659,10 +661,10 @@ export default function Dashboard() {
           options={[
             { label: "All", value: "all" },
             { label: "Today", value: "today" },
-            { label: "7 Days", value: "7days" },
-            { label: "This Month", value: "this_month" },
+            { label: "Yesterday", value: "yesterday" },
+            { label: "This Month", value: "thismonth" },
             { label: "Last Month", value: "last_month" },
-            { label: "This Year", value: "this_year" },
+            { label: "This Year", value: "thisyear" },
             {
               label:
                 dateRange === "custom" && customRange.start && customRange.end

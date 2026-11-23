@@ -98,10 +98,9 @@ const DATE_RANGES = [
   { label: "All", value: "all" },
   { label: "Today", value: "today" },
   { label: "Yesterday", value: "yesterday" },
-  { label: "7 Days", value: "7days" },
-  { label: "1 Month", value: "1month" },
+  { label: "This Month", value: "thismonth" },
   { label: "Last Month", value: "lastmonth" },
-  { label: "1 Year", value: "1year" },
+  { label: "This Year", value: "thisyear" },
   { label: "Custom", value: "custom" },
 ] as const;
 
@@ -130,22 +129,14 @@ function isInDateRange(createdAt: string, range: DateRange, customFrom?: string,
   switch (range) {
     case "today": return created >= todayStart;
     case "yesterday": return created >= todayStart - 86_400_000 && created < todayStart;
-    case "7days": return created >= todayStart - 7 * 86_400_000;
-    case "1month": {
-      // Last 1 month (rolling) relative to today.
-      const from = new Date(now); from.setMonth(from.getMonth() - 1);
-      return created >= startOfDay(from).getTime();
-    }
+    case "thismonth": return created >= startOfDay(new Date(now.getFullYear(), now.getMonth(), 1)).getTime();
     case "lastmonth": {
       // Previous calendar month (not the last 30 days).
       const start = startOfDay(new Date(now.getFullYear(), now.getMonth() - 1, 1)).getTime();
       const end = startOfDay(new Date(now.getFullYear(), now.getMonth(), 1)).getTime();
       return created >= start && created < end;
     }
-    case "1year": {
-      const from = new Date(now); from.setFullYear(from.getFullYear() - 1);
-      return created >= startOfDay(from).getTime();
-    }
+    case "thisyear": return created >= startOfDay(new Date(now.getFullYear(), 0, 1)).getTime();
     case "custom": {
       if (!customFrom && !customTo) return true;
       const from = customFrom ? startOfDay(new Date(customFrom)).getTime() : -Infinity;
@@ -365,7 +356,7 @@ export default function InvoicePage() {
       return;
     }
     // Deep-link filter context (e.g. from the Dashboard Recent Transactions
-    // "View All": /invoice?dateRange=1month). Only apply params that are
+    // "View All": /invoice?dateRange=thismonth). Only apply params that are
     // present so direct visits keep their defaults. The inherited dashboard
     // date window is the single source of truth for the initial date filter.
     const status = searchParams.get("status");
@@ -378,7 +369,7 @@ export default function InvoicePage() {
       if (type) setTypeFilter(type);
       if (category) setCategoryFilter(category);
       if (inheritedDate) {
-        setDateRange(inheritedDate.preset);
+        setDateRange(inheritedDate.preset === "7days" ? "all" : inheritedDate.preset);
         if (inheritedDate.preset === "custom") {
           setCustomFrom(inheritedDate.from ?? "");
           setCustomTo(inheritedDate.to ?? "");

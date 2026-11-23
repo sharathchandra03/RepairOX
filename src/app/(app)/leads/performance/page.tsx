@@ -65,9 +65,10 @@ import {
 const DATE_OPTIONS: { label: string; value: PerfDateRange }[] = [
   { label: "All", value: "all" },
   { label: "Today", value: "today" },
-  { label: "7 Days", value: "7days" },
+  { label: "Yesterday", value: "yesterday" },
   { label: "This Month", value: "thisMonth" },
   { label: "Last Month", value: "lastMonth" },
+  { label: "This Year", value: "thisYear" },
   { label: "Custom", value: "custom" },
 ];
 
@@ -371,13 +372,7 @@ export default function AgentPerformancePage() {
 
   /* Active filter chips (shared). */
   const activeChips: { label?: string; value: string; onClear: () => void }[] = [];
-  if (perf.dateRange !== "all") activeChips.push({
-    label: "Date",
-    value: perf.dateRange === "custom"
-      ? (perf.customFrom && perf.customTo ? `${perf.customFrom} → ${perf.customTo}` : "Custom range")
-      : (DATE_OPTIONS.find((d) => d.value === perf.dateRange)?.label ?? perf.dateRange),
-    onClear: () => setPerf((p) => ({ ...p, dateRange: "all", customFrom: "", customTo: "" })),
-  });
+  // The date range is NOT shown as a chip: the date strip above already shows it.
   if (storeFilter.length > 0) activeChips.push({ label: "Stores", value: `${storeFilter.length} selected`, onClear: () => setStoreFilter([]) });
   if (tab === "all" && agentFilter) activeChips.push({ label: "Agent", value: eligibleAgents.find((a) => a.id === agentFilter)?.name ?? agentFilter, onClear: () => setAgentFilter("") });
   if (perf.source) activeChips.push({ label: "Source", value: perf.source, onClear: () => setPerf((p) => ({ ...p, source: "" })) });

@@ -277,7 +277,7 @@ export default function FieldPage() {
   if (filters.hasTicket) chips.push({ label: "Ticket", value: filters.hasTicket === "yes" ? "Has ticket" : "No ticket", onClear: () => setFilters((f) => ({ ...f, hasTicket: "" as any })) });
   if (filters.delayed) chips.push({ label: "Delayed", value: "only", onClear: () => setFilters((f) => ({ ...f, delayed: false })) });
   if (storeFilter.length > 0) chips.push({ label: "Stores", value: `${storeFilter.length} selected`, onClear: () => setStoreFilter([]) });
-  if (dateRange !== "all") chips.push({ label: "Date", value: FIELD_DATE_RANGES.find((d) => d.value === dateRange)?.label ?? dateRange, onClear: () => setDateRange("all") });
+  // The date range is NOT shown as a chip: the date strip already shows it.
 
   const resetAll = () => { clearFilters(); setQueue("all"); setWorkView("all"); setDateRange("all"); setCustomFrom(""); setCustomTo(""); setStoreFilter([]); setActionFilter(""); setGroupFilter(""); setHideCancelled(false); setAttn(""); };
 

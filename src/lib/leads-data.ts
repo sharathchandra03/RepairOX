@@ -429,15 +429,16 @@ export function followUpNounForStatus(status: string): string {
   return isCallBackStatus(status) ? "Call Back" : "Follow-Up";
 }
 
-/** True when a lead's LIFECYCLE STATUS is specifically a "Follow-Up" stage
- *  (contains "follow", but not a Call Back stage). The numbered "Follow-Ups"
+/** True when a lead's LIFECYCLE STATUS is a follow-up type stage: a "Follow-Up"
+ *  stage OR a "Call Back" stage (a call back is a kind of follow-up, so it is
+ *  surfaced in the Follow-ups view, not as a Lead Status chip). The numbered "Follow-Ups"
  *  view uses this so it also behaves as the old standalone "Follow-Up" status
  *  filter — a lead at the Follow-Up stage is surfaced there even before any
  *  structured follow-up record exists. Case/separator tolerant so an
  *  admin-renamed value ("Follow Up", "Follow-up") still classifies. */
 export function isFollowUpStatus(status: string): boolean {
   const s = (status || "").toLowerCase().replace(/[-_]/g, " ");
-  return s.includes("follow") && !isCallBackStatus(status);
+  return s.includes("follow") || isCallBackStatus(status);
 }
 
 /* ─── Lead devices (for the shared Device & Issue details popup) ─────────
@@ -652,10 +653,9 @@ export const LEAD_DATE_RANGES: { value: LeadDateRange; label: string }[] = [
   { value: "all", label: "All" },
   { value: "today", label: "Today" },
   { value: "yesterday", label: "Yesterday" },
-  { value: "7days", label: "7 Days" },
-  { value: "1month", label: "1 Month" },
+  { value: "thismonth", label: "This Month" },
   { value: "lastmonth", label: "Last Month" },
-  { value: "1year", label: "1 Year" },
+  { value: "thisyear", label: "This Year" },
   { value: "custom", label: "Custom" },
 ];
 
@@ -926,6 +926,14 @@ export const NOT_CONTACTED_LOCK_MS = 48 * 60 * 60 * 1000;
 export function isNotContactedStatus(contactStatus: string): boolean {
   const s = (contactStatus || "").trim().toLowerCase();
   return s === "" || s.startsWith("not contacted") || s === "not contacted";
+}
+
+/** True when the Contact Status reads "No Response" (customer did not pick up /
+ *  reply). Substring-tolerant so an admin-renamed label ("No Response",
+ *  "No response - call back") still matches. A No Response lead is gated like
+ *  Not Contacted (no downstream details) and MUST carry a scheduled call back. */
+export function isNoResponseStatus(contactStatus: string): boolean {
+  return (contactStatus || "").trim().toLowerCase().includes("no response");
 }
 
 /* ═══════════════════════════════════════════════════════════════════════

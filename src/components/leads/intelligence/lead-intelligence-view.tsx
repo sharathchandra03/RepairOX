@@ -2,12 +2,13 @@
 
 import { BackPill, BackLink } from "@/components/common/back-pill";
 import Link from "next/link";
+import * as React from "react";
 import { useMemo, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, ArrowRight, CalendarClock,
   Clock3, Compass, IndianRupee, Info, Layers3, Lightbulb, Lock,
   MapPin, Package, Target, Timer, TrendingDown, TrendingUp, UserRoundCheck,
-  Users, Wrench,
+  Users, Wrench, RotateCcw, Route as RouteIcon, CheckCircle2, Check, X, Gauge, GitBranch, Handshake, FileText, Repeat2, MapPinned, ArrowRightLeft,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Avatar } from "@/components/ui/avatar";
@@ -30,6 +31,10 @@ import {
   type LeadIntelligenceResult,
   type SegmentPerformance,
 } from "@/lib/lead-intelligence";
+import { buildLeadJourneyReport, type LeadJourneyReport } from "@/lib/lead-journey-report";
+import { useLeadStatusHistory } from "@/hooks/use-lead-status-history";
+import { useDeals } from "@/lib/lead-deals-context";
+import { useQuotations } from "@/lib/quotations-context";
 import { calculateLeadSalesMix, type LeadSalesMixResult, type SalesMixRow } from "@/lib/lead-sales-mix";
 import { buildLeadEvidenceHref } from "@/lib/lead-intelligence-url";
 import type { SalesAgent } from "@/lib/sales-agents";
@@ -66,11 +71,13 @@ export function LeadIntelligenceView({
    *  owner analysing a specific agent (owned only). */
   scope?: IntelligenceScopeMode;
 }) {
-  const { leads, followUps, hydrated, loadErrors } = useLeads();
+  const { leads, followUps, hydrated, loadErrors, conversionHistory, assignmentHistory } = useLeads();
+  const { deals } = useDeals();
+  const { quotations } = useQuotations();
   const store = useStore();
   const { stores, activeStoreId } = useStoreContext();
   const catalog = useCatalog();
-  const { can } = usePermissions();
+  const { can, currentUser } = usePermissions();
   const canViewAgents = !ownerContext && allow(can, CAP.lead.performanceAll);
   const [filters, setFilters] = useState<LeadIntelligenceFilters>(initialFilters);
   // Force the Lead cohort onto the loaded store scope so counts and finalized
@@ -106,6 +113,15 @@ export function LeadIntelligenceView({
     refundAllocations: store.invoiceRefundAllocations,
   }), [result.cohort, store.tickets, store.invoices, store.inventory, store.invoiceRefunds, store.invoiceRefundAllocations]);
 
+  // Lead Journey report: follow-up → conversion and Lost → Revived, from the
+  // cohort's real history rows (same cohort + evidence contract as everything above).
+  const cohortIds = useMemo(() => result.cohort.map((l) => l.id), [result.cohort]);
+  const statusHistory = useLeadStatusHistory(cohortIds, hydrated);
+  const journey = useMemo(() => buildLeadJourneyReport({
+    cohort: result.cohort, followUps, statusEvents: statusHistory.events, conversionEvents: conversionHistory,
+    assignmentEvents: assignmentHistory, deals, quotations,
+    revenue: { tickets: store.tickets, invoices: store.invoices },
+  }), [result.cohort, followUps, statusHistory.events, conversionHistory, assignmentHistory, deals, quotations, store.tickets, store.invoices]);
   if (!hydrated || !store.hydrated || !catalog.hydrated) return <IntelligenceSkeleton name={agent.name} />;
   const criticalErrors = [...loadErrors, ...(store.loadErrors ?? [])];
   if (criticalErrors.length) return <DataUnavailable sources={criticalErrors} />;
@@ -177,6 +193,7 @@ export function LeadIntelligenceView({
             <PipelineHealthCard result={result} evidenceHref={evidenceHref} />
           </div>
 
+          <JourneyReportsSection report={journey} loading={!statusHistory.ready} historyFailed={statusHistory.failed} evidenceHref={evidenceHref} userId={currentUser?.id} />
           <SalesCycleCard result={result} evidenceHref={evidenceHref} />
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -883,6 +900,474 @@ function DataQualityCard({ result, salesMix }: { result: LeadIntelligenceResult;
         <div><p className="text-[11px] font-bold uppercase tracking-wide text-amber-800">Data quality notes</p><ul className="mt-1 space-y-0.5 text-[11px] text-amber-800/85">{warnings.map((warning) => <li key={warning}>• {warning}</li>)}</ul></div>
       </div>
     </div>
+  );
+}
+
+/* ───────────────── Lead journey reports ─────────────────
+   The user picks which parts of the lead journey to report on. Every report is
+   computed from the SAME cohort by lib/lead-journey-report.ts; the choice is
+   presentation only and is remembered per user. */
+type JourneyReportId = "followups" | "revived" | "lostwhere" | "stages" | "speed" | "routes" | "deals" | "quotes" | "reassign";
+const JOURNEY_REPORTS: { id: JourneyReportId; label: string; hint: string; icon: React.ComponentType<{ className?: string }>; on: boolean }[] = [
+  { id: "followups", label: "Converted from follow-ups", hint: "How many follow-ups it took before a lead converted", icon: CalendarClock, on: true },
+  { id: "revived", label: "Lost → Revived", hint: "Leads that came back from Lost, and whether they converted", icon: RotateCcw, on: true },
+  { id: "lostwhere", label: "Where leads get lost", hint: "The stage leads were in when they were marked Lost", icon: MapPinned, on: false },
+  { id: "stages", label: "Stage movement", hint: "The most common moves from one stage to the next", icon: ArrowRightLeft, on: false },
+  { id: "speed", label: "Speed through the journey", hint: "Typical days from creation to contact, qualification, route and conversion", icon: Gauge, on: false },
+  { id: "routes", label: "Route outcomes", hint: "Store visit vs Pickup & Drop vs On-site: conversion, revenue and speed", icon: GitBranch, on: false },
+  { id: "deals", label: "Discount requests", hint: "Deal approvals and how those leads ended up", icon: Handshake, on: false },
+  { id: "quotes", label: "Quotations", hint: "Leads that were sent a quotation vs those that were not", icon: FileText, on: false },
+  { id: "reassign", label: "Reassignment", hint: "Leads that changed hands vs those kept by one agent", icon: Repeat2, on: false },
+];
+const JOURNEY_DEFAULT = JOURNEY_REPORTS.filter((x) => x.on).map((x) => x.id);
+
+function useJourneySelection(userId?: string): [JourneyReportId[], (next: JourneyReportId[]) => void] {
+  const key = `repairox-journey-reports::${userId ?? "anon"}`;
+  const [sel, setSel] = useState<JourneyReportId[]>(JOURNEY_DEFAULT);
+  React.useEffect(() => {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return;
+      const valid = (JSON.parse(raw) as string[]).filter((x): x is JourneyReportId => JOURNEY_REPORTS.some((r) => r.id === x));
+      setSel(valid);
+    } catch { /* storage unavailable */ }
+  }, [key]);
+  const save = (next: JourneyReportId[]) => {
+    setSel(next);
+    try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* ignore */ }
+  };
+  return [sel, save];
+}
+function fmtDays(d: number | null): string {
+  if (d == null) return "—";
+  if (d < 1 / 24) return "<1 hr";
+  if (d < 1) return `${Math.round(d * 24)} hr`;
+  return `${d < 10 ? (Math.round(d * 10) / 10).toString() : Math.round(d)} d`;
+}
+function JourneyReportsSection({ report, loading, historyFailed, evidenceHref, userId }: { report: LeadJourneyReport; loading: boolean; historyFailed: boolean; evidenceHref: (ids: string[]) => string; userId?: string }) {
+  const r = report;
+  const [sel, setSel] = useJourneySelection(userId);
+  // The picker can be closed once you have chosen, and reopened from the bar.
+  const openKey = `repairox-journey-picker-open::${userId ?? "anon"}`;
+  // Closed by default; it only starts open if the user last left it open.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  React.useEffect(() => { try { if (localStorage.getItem(openKey) === "1") setPickerOpen(true); } catch { /* ignore */ } }, [openKey]);
+  const setOpen = (v: boolean) => { setPickerOpen(v); try { localStorage.setItem(openKey, v ? "1" : "0"); } catch { /* ignore */ } };
+  const toggle = (id: JourneyReportId) => setSel(sel.includes(id) ? sel.filter((x) => x !== id) : [...sel, id]);
+  const chosen = JOURNEY_REPORTS.filter((x) => sel.includes(x.id));
+  const cards: Record<JourneyReportId, React.ReactNode> = {
+    followups: <FollowUpToConversionCard r={r} evidenceHref={evidenceHref} />,
+    revived: <LostRevivedCard r={r} loading={loading} historyFailed={historyFailed} evidenceHref={evidenceHref} />,
+    lostwhere: <LostWhereCard r={r} loading={loading} historyFailed={historyFailed} evidenceHref={evidenceHref} />,
+    stages: <StageMovementCard r={r} loading={loading} historyFailed={historyFailed} evidenceHref={evidenceHref} />,
+    speed: <SpeedCard r={r} evidenceHref={evidenceHref} />,
+    routes: <RoutesCard r={r} evidenceHref={evidenceHref} />,
+    deals: <DealsCard r={r} evidenceHref={evidenceHref} />,
+    quotes: <QuotesCard r={r} evidenceHref={evidenceHref} />,
+    reassign: <ReassignCard r={r} evidenceHref={evidenceHref} />,
+  };
+  return (
+    <section className="space-y-3">
+      <SectionHeading
+        icon={RouteIcon}
+        title="Lead journey reports"
+        subtitle="Built from each lead's real footprint: follow-ups, status changes, route, deals, quotations and hand-offs. Converted = reached a Walk-In, Field Job, Ticket or Invoice (or was marked Won). Association, not causation."
+        accent="violet"
+      />
+      {/* Report picker — closable. Closed = a slim bar showing what is selected. */}
+      {pickerOpen ? (
+        <div className="rounded-2xl border border-zinc-300 bg-card p-3.5 shadow-card">
+          <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Choose what to see <span className="ml-1 rounded-full bg-[#EDE9FE] px-2 py-0.5 text-[10.5px] normal-case tracking-normal text-[#6D28D9]">{chosen.length} of {JOURNEY_REPORTS.length} shown</span>
+            </p>
+            <div className="flex items-center gap-3 text-[11.5px] font-semibold">
+              <button type="button" onClick={() => setSel(JOURNEY_REPORTS.map((x) => x.id))} className="text-[#6D28D9] hover:underline">Show all</button>
+              <button type="button" onClick={() => setSel([])} className="text-muted-foreground hover:text-foreground hover:underline">Clear</button>
+              <button type="button" onClick={() => setSel(JOURNEY_DEFAULT)} className="text-muted-foreground hover:text-foreground hover:underline">Reset</button>
+              <button type="button" onClick={() => setOpen(false)} aria-label="Close report picker" title="Close"
+                className="grid h-6 w-6 place-items-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {JOURNEY_REPORTS.map((x) => {
+              const on = sel.includes(x.id);
+              const Icon = x.icon;
+              return (
+                <button key={x.id} type="button" onClick={() => toggle(x.id)} aria-pressed={on} title={x.hint}
+                  className={cn("inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-left text-[12.5px] font-semibold transition",
+                    on ? "border-[#6D28D9] bg-[#EDE9FE] text-[#5B21B6] ring-1 ring-[#6D28D9]/20" : "border-border bg-card text-zinc-600 hover:border-[#6D28D9]/40 hover:bg-muted/40")}>
+                  <span className={cn("grid h-5 w-5 place-items-center rounded-md", on ? "bg-[#6D28D9] text-white" : "bg-muted text-muted-foreground")}>
+                    {on ? <Check className="h-3 w-3" strokeWidth={3} /> : <Icon className="h-3 w-3" />}
+                  </span>
+                  {x.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-zinc-300 bg-card px-3 py-2 shadow-sm">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Showing</span>
+          <span className="rounded-full bg-[#EDE9FE] px-2 py-0.5 text-[10.5px] font-semibold text-[#6D28D9]">{chosen.length} of {JOURNEY_REPORTS.length}</span>
+          <span className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground">{chosen.length ? chosen.map((x) => x.label).join(" · ") : "nothing selected"}</span>
+          <button type="button" onClick={() => setOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-[#6D28D9]/30 bg-[#EDE9FE]/60 px-2.5 py-1 text-[11.5px] font-semibold text-[#5B21B6] transition hover:bg-[#EDE9FE]">
+            <RouteIcon className="h-3 w-3" /> Choose reports
+          </button>
+        </div>
+      )}
+      {chosen.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-zinc-300 bg-card p-8 text-center">
+          <span className="mx-auto grid h-10 w-10 place-items-center rounded-xl bg-[#EDE9FE] text-[#6D28D9]"><RouteIcon className="h-5 w-5" /></span>
+          <p className="mt-2 text-[13px] font-semibold">Pick a report above</p>
+          <p className="mt-0.5 text-[12px] text-muted-foreground">Choose one or more parts of the lead journey to see them here.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          {chosen.map((x) => <React.Fragment key={x.id}>{cards[x.id]}</React.Fragment>)}
+        </div>
+      )}
+      {r.notes.length > 0 && chosen.some((x) => x.id === "followups" || x.id === "revived") && (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2 text-[11.5px] text-amber-800">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <ul className="space-y-0.5">{r.notes.map((n) => <li key={n}>{n}</li>)}</ul>
+        </div>
+      )}
+    </section>
+  );
+}
+/** Counts always; a percentage only once the group is big enough to mean something. */
+function RateCell({ converted, leads, rate, sufficient }: { converted: number; leads: number; rate: number; sufficient: boolean }) {
+  return (
+    <span className="tabular-nums">
+      <span className="font-semibold">{converted}</span><span className="text-muted-foreground"> of {leads}</span>
+      {sufficient ? <span className="ml-1.5 font-bold text-[#6D28D9]">{pct(rate)}</span> : <span className="ml-1.5 text-[10px] text-muted-foreground" title="Small group. A percentage appears at 10+ leads.">small group</span>}
+    </span>
+  );
+}
+function CompareTable({ rows, evidenceHref, head = "Group" }: { rows: LeadJourneyReport["quotations"]["compare"]; evidenceHref: (ids: string[]) => string; head?: string }) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-border">
+      <table className="w-full text-[12px]">
+        <thead className="bg-[#EEF1FD] text-[10px] uppercase tracking-wider text-[#4361EE]">
+          <tr><th className="px-3 py-2 text-left font-semibold">{head}</th><th className="px-3 py-2 text-right font-semibold">Converted</th></tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.key} className="border-t border-border">
+              <td className="px-3 py-2 font-medium">{row.leads > 0 ? <Link href={evidenceHref(row.evidenceIds)} className="hover:text-[#6D28D9] hover:underline">{row.label}</Link> : <span className="text-muted-foreground">{row.label}</span>}</td>
+              <td className="px-3 py-2 text-right"><RateCell converted={row.converted} leads={row.leads} rate={row.rate} sufficient={row.sufficient} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+function HistoryGate({ r, loading, historyFailed, children }: { r: LeadJourneyReport; loading: boolean; historyFailed: boolean; children: React.ReactNode }) {
+  if (loading) return <div className="mt-4"><Insufficient text="Reading the status history…" /></div>;
+  if (historyFailed) return <div className="mt-4"><Insufficient text="The status history could not be loaded. Refresh to try again." /></div>;
+  if (!r.hasStatusHistory) return <div className="mt-4"><Insufficient text="No status history yet for this cohort, so this cannot be measured." /></div>;
+  return <>{children}</>;
+}
+function LostWhereCard({ r, loading, historyFailed, evidenceHref }: { r: LeadJourneyReport; loading: boolean; historyFailed: boolean; evidenceHref: (ids: string[]) => string }) {
+  const max = Math.max(1, ...r.lostWhere.map((x) => x.count));
+  return (
+    <Card accent="rose">
+      <SectionHeading icon={MapPinned} title="Where leads get lost" subtitle="The stage a lead was in when it was marked Lost." accent="rose" />
+      <HistoryGate r={r} loading={loading} historyFailed={historyFailed}>
+        {r.lostWhere.length === 0 ? <div className="mt-4"><Insufficient text="No lead in this cohort has been marked Lost." /></div> : (
+          <div className="mt-4 space-y-2">
+            {r.lostWhere.map((x) => (
+              <Link key={x.stage} href={evidenceHref(x.evidenceIds)} className="block rounded-md hover:bg-muted/40">
+                <div className="flex items-center gap-3">
+                  <span className="w-[130px] shrink-0 truncate text-[12px] text-muted-foreground" title={x.stage}>{x.stage}</span>
+                  <span className="relative h-2.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted"><span className="absolute inset-y-0 left-0 rounded-full bg-rose-500" style={{ width: `${(x.count / max) * 100}%` }} /></span>
+                  <span className="w-16 shrink-0 text-right text-[12px] tabular-nums"><b>{x.count}</b> <span className="text-muted-foreground">· {pct(x.share)}</span></span>
+                </div>
+              </Link>
+            ))}
+            <p className="pt-1 text-[11px] text-muted-foreground">{r.everLost} lead{r.everLost === 1 ? "" : "s"} marked Lost in total.</p>
+          </div>
+        )}
+      </HistoryGate>
+    </Card>
+  );
+}
+function StageMovementCard({ r, loading, historyFailed, evidenceHref }: { r: LeadJourneyReport; loading: boolean; historyFailed: boolean; evidenceHref: (ids: string[]) => string }) {
+  const max = Math.max(1, ...r.transitions.map((x) => x.moves));
+  return (
+    <Card accent="blue">
+      <SectionHeading icon={ArrowRightLeft} title="Stage movement" subtitle="The most common moves from one lead stage to the next." accent="blue" />
+      <HistoryGate r={r} loading={loading} historyFailed={historyFailed}>
+        {r.transitions.length === 0 ? <div className="mt-4"><Insufficient text="No stage changes recorded for this cohort." /></div> : (
+          <div className="mt-4 space-y-1.5">
+            {r.transitions.map((x) => (
+              <Link key={`${x.from}→${x.to}`} href={evidenceHref(x.evidenceIds)} className="block rounded-md px-1 py-1 hover:bg-muted/40">
+                <div className="flex items-center gap-2 text-[12px]">
+                  <span className="min-w-0 max-w-[40%] truncate font-medium" title={x.from}>{x.from}</span>
+                  <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 max-w-[40%] truncate font-semibold text-[#4361EE]" title={x.to}>{x.to}</span>
+                  <span className="ml-auto shrink-0 tabular-nums"><b>{x.moves}</b> <span className="text-muted-foreground">move{x.moves === 1 ? "" : "s"} · {x.leads} lead{x.leads === 1 ? "" : "s"}</span></span>
+                </div>
+                <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-muted"><span className="block h-full rounded-full bg-[#4361EE]/70" style={{ width: `${(x.moves / max) * 100}%` }} /></span>
+              </Link>
+            ))}
+            <p className="pt-1 text-[11px] text-muted-foreground">{r.totalMoves} stage change{r.totalMoves === 1 ? "" : "s"} in total. Showing the top {r.transitions.length}.</p>
+          </div>
+        )}
+      </HistoryGate>
+    </Card>
+  );
+}
+function SpeedCard({ r, evidenceHref }: { r: LeadJourneyReport; evidenceHref: (ids: string[]) => string }) {
+  const max = Math.max(0.01, ...r.speed.map((x) => x.medianDays ?? 0));
+  return (
+    <Card accent="sky">
+      <SectionHeading icon={Gauge} title="Speed through the journey" subtitle="Typical (median) time from a lead being created to each milestone." accent="blue" />
+      <div className="mt-4 space-y-2.5">
+        {r.speed.map((x) => {
+          const row = (
+            <div className="flex items-center gap-3">
+              <span className="w-[130px] shrink-0 text-[12px] text-muted-foreground">{x.label}</span>
+              <span className="relative h-2.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
+                {x.medianDays != null && <span className="absolute inset-y-0 left-0 rounded-full bg-sky-500" style={{ width: `${Math.max(3, (x.medianDays / max) * 100)}%` }} />}
+              </span>
+              <span className="w-[88px] shrink-0 text-right text-[12px] tabular-nums">
+                <b>{fmtDays(x.medianDays)}</b> <span className="text-muted-foreground">· {x.n} lead{x.n === 1 ? "" : "s"}</span>
+              </span>
+            </div>
+          );
+          return x.n > 0 ? <Link key={x.key} href={evidenceHref(x.evidenceIds)} className="block rounded-md hover:bg-muted/40">{row}</Link> : <div key={x.key} className="opacity-60">{row}</div>;
+        })}
+        <p className="pt-1 text-[11px] text-muted-foreground">A typical time shows once 3 or more leads reached that milestone.</p>
+      </div>
+    </Card>
+  );
+}
+function RoutesCard({ r, evidenceHref }: { r: LeadJourneyReport; evidenceHref: (ids: string[]) => string }) {
+  return (
+    <Card accent="indigo">
+      <SectionHeading icon={GitBranch} title="Route outcomes" subtitle="What happened to leads sent down each service route." accent="blue" />
+      {r.routes.length === 0 ? <div className="mt-4"><Insufficient text="No leads in this cohort." /></div> : (
+        <div className="mt-4 overflow-hidden rounded-xl border border-border">
+          <table className="w-full text-[12px]">
+            <thead className="bg-[#EEF1FD] text-[10px] uppercase tracking-wider text-[#4361EE]">
+              <tr><th className="px-3 py-2 text-left font-semibold">Route</th><th className="px-2 py-2 text-right font-semibold">Converted</th><th className="px-2 py-2 text-right font-semibold">Typical time</th><th className="px-3 py-2 text-right font-semibold">Revenue</th></tr>
+            </thead>
+            <tbody>
+              {r.routes.map((x) => (
+                <tr key={x.route} className="border-t border-border">
+                  <td className="px-3 py-2 font-medium"><Link href={evidenceHref(x.evidenceIds)} className="hover:text-[#6D28D9] hover:underline">{x.label}</Link></td>
+                  <td className="px-2 py-2 text-right"><RateCell converted={x.converted} leads={x.leads} rate={x.rate} sufficient={x.sufficient} /></td>
+                  <td className="px-2 py-2 text-right tabular-nums">{fmtDays(x.medianDaysToConvert)}</td>
+                  <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatINR(x.revenue)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="mt-2 text-[11px] text-muted-foreground">Revenue is finalized invoices only. Choosing a route is not a conversion.</p>
+    </Card>
+  );
+}
+function DealsCard({ r, evidenceHref }: { r: LeadJourneyReport; evidenceHref: (ids: string[]) => string }) {
+  const d = r.deals;
+  const tones = ["bg-zinc-50 text-zinc-700 ring-zinc-200", "bg-emerald-50 text-emerald-700 ring-emerald-200", "bg-rose-50 text-rose-700 ring-rose-200", "bg-amber-50 text-amber-700 ring-amber-200"];
+  return (
+    <Card accent="amber">
+      <SectionHeading icon={Handshake} title="Discount requests" subtitle="Leads where a discount was requested, and how those leads ended up." accent="amber" />
+      {d.leadsWithDeal === 0 ? <div className="mt-4"><Insufficient text="No discount request has been made on a lead in this cohort." /></div> : (
+        <>
+          <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+            {d.rows.map((x, i) => (
+              <Link key={x.key} href={x.count > 0 ? evidenceHref(x.evidenceIds) : "#"} className={cn("rounded-xl px-2 py-3 text-center ring-1 ring-inset", tones[i], x.count === 0 && "pointer-events-none opacity-70")}>
+                <span className="block text-2xl font-extrabold tabular-nums leading-none">{x.count}</span>
+                <span className="mt-1.5 block text-[10px] font-semibold uppercase tracking-wide">{x.label}</span>
+              </Link>
+            ))}
+          </div>
+          <div className="mt-4"><CompareTable rows={d.compare} evidenceHref={evidenceHref} head="Leads with" /></div>
+        </>
+      )}
+    </Card>
+  );
+}
+function QuotesCard({ r, evidenceHref }: { r: LeadJourneyReport; evidenceHref: (ids: string[]) => string }) {
+  const q = r.quotations;
+  return (
+    <Card accent="emerald">
+      <SectionHeading icon={FileText} title="Quotations" subtitle="Leads that were sent a quotation compared with those that were not." accent="emerald" />
+      {q.sent === 0 ? <div className="mt-4"><Insufficient text="No quotation has been sent on a lead in this cohort." /></div> : (
+        <>
+          <div className="mt-4 grid grid-cols-2 gap-2.5">
+            <BigStat label="Leads quoted" value={String(q.leadsQuoted)} />
+            <BigStat label="Quotations sent" value={String(q.sent)} tone="text-emerald-600" />
+          </div>
+          <div className="mt-4"><CompareTable rows={q.compare} evidenceHref={evidenceHref} head="Leads with" /></div>
+        </>
+      )}
+      <p className="mt-2 text-[11px] text-muted-foreground">A quotation is an offer, not revenue. Observed association only.</p>
+    </Card>
+  );
+}
+function ReassignCard({ r, evidenceHref }: { r: LeadJourneyReport; evidenceHref: (ids: string[]) => string }) {
+  const o = r.ownership;
+  return (
+    <Card accent="violet">
+      <SectionHeading icon={Repeat2} title="Reassignment" subtitle="Leads that changed hands compared with leads kept by one agent." accent="violet" />
+      {!o.hasData || o.reassigned === 0 ? <div className="mt-4"><Insufficient text={o.hasData ? "No lead in this cohort has been reassigned." : "No assignment history for this cohort yet."} /></div> : (
+        <>
+          <div className="mt-4 grid grid-cols-2 gap-2.5">
+            <BigStat label="Leads reassigned" value={String(o.reassigned)} tone="text-[#6D28D9]" />
+            <BigStat label="Hand-offs in total" value={String(o.totalHandoffs)} />
+          </div>
+          <div className="mt-4"><CompareTable rows={o.compare} evidenceHref={evidenceHref} head="Leads that" /></div>
+        </>
+      )}
+    </Card>
+  );
+}
+function BigStat({ label, value, sub, tone = "text-foreground" }: { label: string; value: string; sub?: string; tone?: string }) {
+  return (
+    <div className="rounded-xl border border-zinc-300 bg-muted/15 p-3">
+      <p className={cn("text-2xl font-extrabold tabular-nums leading-none", tone)}>{value}</p>
+      <p className="mt-1.5 text-[9.5px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+      {sub && <p className="mt-0.5 text-[11px] text-muted-foreground">{sub}</p>}
+    </div>
+  );
+}
+function FollowUpToConversionCard({ r, evidenceHref }: { r: LeadJourneyReport; evidenceHref: (ids: string[]) => string }) {
+  const known = r.converted - r.convertedUnknownTime;
+  const maxDepth = Math.max(1, ...r.depth.map((d) => d.leads));
+  const share = known > 0 ? r.convertedAfterFollowUp / known : 0;
+  return (
+    <Card accent="amber">
+      <SectionHeading icon={CalendarClock} title="Converted from follow-ups" subtitle="How many completed follow-ups a lead had before it converted." accent="amber" />
+      {r.converted === 0 ? (
+        <div className="mt-4"><Insufficient text="No lead in this cohort has converted yet." /></div>
+      ) : (
+        <>
+          <div className="mt-4 grid grid-cols-3 gap-2.5">
+            <BigStat label="Converted" value={String(r.converted)} />
+            <BigStat label="After a follow-up" value={String(r.convertedAfterFollowUp)} sub={known > 0 ? `${pct(share)} of ${known}` : undefined} tone="text-amber-600" />
+            <BigStat label="Typical follow-ups" value={r.medianFollowUpsToConvert == null ? "—" : String(r.medianFollowUpsToConvert)} sub={r.medianFollowUpsToConvert == null ? "needs 3+ conversions" : "before converting"} />
+          </div>
+          <div className="mt-4 space-y-2">
+            <p className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">Follow-ups completed before converting</p>
+            {r.depth.map((d) => {
+              const body = (
+                <div className="flex items-center gap-3">
+                  <span className="w-[132px] shrink-0 text-[12px] text-muted-foreground">{d.label}</span>
+                  <span className="relative h-2.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
+                    <span className={cn("absolute inset-y-0 left-0 rounded-full", d.key === "0" ? "bg-zinc-400" : "bg-amber-500")} style={{ width: `${(d.leads / maxDepth) * 100}%` }} />
+                  </span>
+                  <span className="w-7 shrink-0 text-right text-[13px] font-bold tabular-nums">{d.leads}</span>
+                </div>
+              );
+              return d.leads > 0 ? <Link key={d.key} href={evidenceHref(d.evidenceIds)} className="block rounded-md hover:bg-muted/40">{body}</Link> : <div key={d.key} className="opacity-60">{body}</div>;
+            })}
+          </div>
+          {r.outcomes.length > 0 && (
+            <div className="mt-5">
+              <p className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">Follow-up outcome → later converted</p>
+              <div className="overflow-hidden rounded-xl border border-border">
+                <table className="w-full text-[12px]">
+                  <thead className="bg-[#EEF1FD] text-[10px] uppercase tracking-wider text-[#4361EE]">
+                    <tr><th className="px-3 py-2 text-left font-semibold">Outcome</th><th className="px-2 py-2 text-right font-semibold">Closed</th><th className="px-2 py-2 text-right font-semibold">Converted after</th><th className="px-3 py-2 text-right font-semibold">Rate</th></tr>
+                  </thead>
+                  <tbody>
+                    {r.outcomes.slice(0, 6).map((o) => (
+                      <tr key={o.outcome} className="border-t border-border">
+                        <td className="px-3 py-2 font-medium"><Link href={evidenceHref(o.evidenceIds)} className="hover:text-[#6D28D9] hover:underline">{o.outcome}</Link></td>
+                        <td className="px-2 py-2 text-right tabular-nums">{o.closed}</td>
+                        <td className="px-2 py-2 text-right tabular-nums">{o.thenConverted}</td>
+                        <td className="px-3 py-2 text-right font-semibold tabular-nums" title={o.sufficient ? undefined : `Rate shows once an outcome has ${r.minSample}+ closed follow-ups`}>{o.sufficient ? pct(o.rate) : <span className="text-muted-foreground">n/a</span>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-4">
+            {r.convertedAfterFollowUpEvidence.length > 0 && <EvidenceLink href={evidenceHref(r.convertedAfterFollowUpEvidence)} />}
+            <Link href={evidenceHref(r.convertedEvidence)} className="mt-2.5 inline-flex items-center gap-1 text-[11px] font-semibold text-[#6D28D9] hover:underline">All converted leads <ArrowRight className="h-3 w-3" /></Link>
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+function LostRevivedCard({ r, loading, historyFailed, evidenceHref }: { r: LeadJourneyReport; loading: boolean; historyFailed: boolean; evidenceHref: (ids: string[]) => string }) {
+  const steps = [
+    { label: "Marked Lost", value: r.everLost, ids: r.everLostEvidence, tone: "bg-rose-50 text-rose-700 ring-rose-200" },
+    { label: "Revived", value: r.revived, ids: r.revivedEvidence, tone: "bg-amber-50 text-amber-700 ring-amber-200" },
+    { label: "Then converted", value: r.revivedConverted, ids: r.revivedConvertedEvidence, tone: "bg-emerald-50 text-emerald-700 ring-emerald-200" },
+  ];
+  return (
+    <Card accent="emerald">
+      <SectionHeading icon={RotateCcw} title="Lost → Revived" subtitle="Leads that were marked Lost and later moved on, from the status history." accent="emerald" />
+      {loading ? (
+        <div className="mt-4"><Insufficient text="Reading the status history…" /></div>
+      ) : historyFailed ? (
+        <div className="mt-4"><Insufficient text="The status history could not be loaded. Refresh to try again." /></div>
+      ) : !r.hasStatusHistory ? (
+        <div className="mt-4"><Insufficient text="No status history yet for this cohort, so revivals cannot be measured." /></div>
+      ) : r.everLost === 0 ? (
+        <div className="mt-4"><Insufficient text="No lead in this cohort has been marked Lost." /></div>
+      ) : (
+        <>
+          <div className="mt-4 flex items-stretch gap-1.5">
+            {steps.map((st, i) => (
+              <React.Fragment key={st.label}>
+                {i > 0 && <span className="grid shrink-0 place-items-center text-muted-foreground"><ArrowRight className="h-4 w-4" /></span>}
+                <Link href={st.value > 0 ? evidenceHref(st.ids) : "#"} aria-disabled={st.value === 0} className={cn("flex min-w-0 flex-1 flex-col items-center rounded-xl px-2 py-3 ring-1 ring-inset transition", st.tone, st.value > 0 ? "hover:shadow-md" : "pointer-events-none opacity-70")}>
+                  <span className="text-2xl font-extrabold tabular-nums leading-none">{st.value}</span>
+                  <span className="mt-1.5 text-center text-[10px] font-semibold uppercase tracking-wide">{st.label}</span>
+                </Link>
+              </React.Fragment>
+            ))}
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-2.5">
+            <MiniMetric label="Revival rate" value={pct(r.revivalRate)} />
+            <MiniMetric label="Typical days lost" value={r.medianDaysLost == null ? "—" : String(Math.round(r.medianDaysLost))} />
+            <MiniMetric label="Revenue after revival" value={formatINR(r.revivedRevenue)} />
+          </div>
+          {r.stillLost > 0 && <p className="mt-2 text-[11px] text-muted-foreground">{r.stillLost} lead{r.stillLost === 1 ? " is" : "s are"} still Lost.</p>}
+          {r.revivedRows.length > 0 ? (
+            <div className="mt-4 overflow-hidden rounded-xl border border-border">
+              <table className="w-full text-[12px]">
+                <thead className="bg-[#EEF1FD] text-[10px] uppercase tracking-wider text-[#4361EE]">
+                  <tr><th className="px-3 py-2 text-left font-semibold">Lead</th><th className="px-2 py-2 text-left font-semibold">Lost for</th><th className="px-2 py-2 text-left font-semibold">Back to</th><th className="px-3 py-2 text-right font-semibold">Result</th></tr>
+                </thead>
+                <tbody>
+                  {r.revivedRows.slice(0, 6).map((row) => (
+                    <tr key={row.leadId} className="border-t border-border">
+                      <td className="px-3 py-2">
+                        <Link href={`/leads/${row.leadId}`} className="font-semibold text-[#4361EE] hover:underline">{row.leadNo}</Link>
+                        <p className="max-w-[140px] truncate text-[11px] text-muted-foreground" title={row.lostReason || undefined}>{row.name}{row.lostReason ? ` · ${row.lostReason}` : ""}</p>
+                      </td>
+                      <td className="px-2 py-2 tabular-nums">{row.daysLost === 0 ? "same day" : `${row.daysLost} day${row.daysLost === 1 ? "" : "s"}`}</td>
+                      <td className="px-2 py-2"><span className="block max-w-[110px] truncate font-medium" title={row.revivedTo}>{row.revivedTo || "—"}</span>{row.revivedBy && <span className="text-[10.5px] text-muted-foreground">by {row.revivedBy}</span>}</td>
+                      <td className="px-3 py-2 text-right">
+                        {row.convertedAfterRevival
+                          ? <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10.5px] font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200"><CheckCircle2 className="h-3 w-3" /> Converted{row.revenue > 0 ? ` · ${formatINR(row.revenue)}` : ""}</span>
+                          : <span className="inline-flex rounded-full bg-zinc-50 px-2 py-0.5 text-[10.5px] font-semibold text-zinc-600 ring-1 ring-inset ring-zinc-200">In progress</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {r.revivedRows.length > 6 && <p className="border-t border-border bg-muted/20 px-3 py-1.5 text-[11px] text-muted-foreground">Showing 6 of {r.revivedRows.length}. <Link href={evidenceHref(r.revivedEvidence)} className="font-semibold text-[#6D28D9] hover:underline">View all in the Lead Table</Link></p>}
+            </div>
+          ) : (
+            <div className="mt-4"><Insufficient text="None of the Lost leads has been revived yet." /></div>
+          )}
+        </>
+      )}
+    </Card>
   );
 }
 

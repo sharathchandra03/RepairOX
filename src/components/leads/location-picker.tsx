@@ -28,6 +28,9 @@ import { MapPin, Search, X, LocateFixed, Loader2, Check, Crosshair, Plus, Copy }
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { loadLeaflet } from "@/lib/leaflet-loader";
+import { usePermissions } from "@/lib/permissions-context";
+import { parseMapsUrl } from "@/lib/maps-url";
+import { isShortMapsLink } from "@/lib/maps-resolve";
 import {
   type CityScope,
   DEFAULT_CITY_SCOPES,
@@ -56,8 +59,9 @@ const PIN_ZOOM = 16;
 const DEFAULT_ZOOM = 5;
 
 export interface PickedLocation {
-  lat: number;
-  lng: number;
+  /** Coordinates are optional: the link + address text are the primary location. */
+  lat: number | null;
+  lng: number | null;
   /** Reverse-geocoded / searched display address (may be ""). */
   address: string;
   /** Shareable maps URL for the picked point. */
@@ -86,6 +90,13 @@ export function parseCoordinates(raw: string): { lat: number; lng: number } | nu
   return { lat, lng };
 }
 
+/** True when the pasted text is a map link (Google short/long, OSM) rather than a place name. */
+export function looksLikeMapsLink(raw: string): boolean {
+  const t = (raw || "").trim();
+  if (!t || /\s/.test(t)) return false;
+  return /^(https?:\/\/)?([a-z0-9-]+\.)*(maps\.app\.goo\.gl|goo\.gl\/maps|g\.co\/|google\.[a-z.]+\/maps|maps\.google\.[a-z.]+|openstreetmap\.org)/i.test(t)
+    || /^https?:\/\//i.test(t);
+}
 async function reverseGeocode(lat: number, lng: number): Promise<string> {
   try {
     const res = await fetch(`${NOMINATIM}/reverse?format=jsonv2&lat=${lat}&lon=${lng}`, {
@@ -226,6 +237,11 @@ export function LocationPicker({
   const [resolving, setResolving] = useState(false);
   const [picked, setPicked] = useState<PickedLocation | null>(null);
   const [noResults, setNoResults] = useState(false);
+  const { apiFetch } = usePermissions();
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkMsg, setLinkMsg] = useState("");
+  const linkUrlRef = useRef<string>("");
+  const handledLinkRef = useRef<string>("");
   // Admin-managed target cities (persisted per browser). Search is constrained
   // to the selected city's bounding box; results only come from inside it.
   const [cities, setCities] = useState<CityScope[]>(DEFAULT_CITY_SCOPES);
@@ -243,10 +259,10 @@ export function LocationPicker({
   const [cityQuery, setCityQuery] = useState("");
   const [resolvingCity, setResolvingCity] = useState(false);
   const [cityError, setCityError] = useState("");
-  const [copied, setCopied] = useState<"coords" | "address" | null>(null);
+  const [copied, setCopied] = useState<"link" | "address" | null>(null);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
 
-  const copyText = useCallback(async (text: string, which: "coords" | "address") => {
+  const copyText = useCallback(async (text: string, which: "link" | "address") => {
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
@@ -270,7 +286,7 @@ export function LocationPicker({
     saveCityScopes(next);
   }, []);
 
-  const setPin = useCallback(async (lat: number, lng: number, addressHint?: string) => {
+  const setPin = useCallback(async (lat: number, lng: number, addressHint?: string, linkUrl?: string) => {
     const L = LRef.current;
     if (L && mapRef.current) {
       if (markerRef.current) {
@@ -285,7 +301,8 @@ export function LocationPicker({
       mapRef.current.setView([lat, lng], Math.max(mapRef.current.getZoom(), PIN_ZOOM));
     }
     // Optimistic pin (coordinates first); resolve the address in the background.
-    setPicked({ lat, lng, address: addressHint ?? "", mapsUrl: mapsUrlFor(lat, lng), region: "" });
+    // A pasted Google Maps link is kept VERBATIM as the shareable link so the field team opens the exact place the agent had.
+    setPicked({ lat, lng, address: addressHint ?? "", mapsUrl: linkUrl || mapsUrlFor(lat, lng), region: "" });
     if (!addressHint) {
       setResolving(true);
       const addr = await reverseGeocode(lat, lng);
@@ -293,6 +310,45 @@ export function LocationPicker({
       setPicked((prev) => (prev && prev.lat === lat && prev.lng === lng ? { ...prev, address: addr } : prev));
     }
   }, []);
+
+  /* Paste a Google Maps link (short maps.app.goo.gl or full) → drop the pin on it. */
+  const handleLink = useCallback(async (raw: string) => {
+    const original = raw.trim();
+    // The LINK is the primary location. If we can't read a point from it we still
+    // keep it (link-only) so it travels to the field team with the typed address.
+    const keepLinkOnly = (msg: string) => { setPicked({ lat: null, lng: null, address: "", mapsUrl: original, region: "" }); setLinkMsg(msg); };
+    setLinkBusy(true); setLinkMsg(""); setResults([]); setNoResults(false);
+    try {
+      let parsed = parseMapsUrl(original);
+      if (parsed.kind === "short" || isShortMapsLink(original)) {
+        try {
+          const res = await apiFetch("/api/maps/resolve", { method: "POST", body: JSON.stringify({ url: original }) });
+          const j = res.json ?? {};
+          if (res.ok && j?.finalUrl) parsed = parseMapsUrl(j.finalUrl);
+          else { keepLinkOnly("Link saved as-is (couldn't read its location). It will be sent to the field team along with the address you type."); return; }
+        } catch { keepLinkOnly("Link saved as-is (couldn't read its location). It will be sent to the field team along with the address you type."); return; }
+      }
+      if (!parsed.valid) { setLinkMsg(parsed.message || "That doesn't look like a Google Maps link."); return; }
+      linkUrlRef.current = original;
+      if (parsed.lat != null && parsed.lng != null) {
+        await setPin(parsed.lat, parsed.lng, undefined, original);
+        setLinkMsg("Pin placed from your Google Maps link.");
+        return;
+      }
+      if (parsed.addressHint) {
+        const r = await searchAddress(parsed.addressHint, searchBboxRef.current);
+        if (r[0]) { await setPin(r[0].lat, r[0].lng, r[0].label, original); setLinkMsg(`Link had no coordinates. Pinned the best match for "${parsed.addressHint}". Drag the pin if it's off.`); return; }
+      }
+      keepLinkOnly("Link saved as-is. It will be sent to the field team along with the address you type.");
+    } finally { setLinkBusy(false); }
+  }, [apiFetch, setPin]);
+  // Auto-resolve a pasted link as soon as it lands in the search box.
+  useEffect(() => {
+    if (!looksLikeMapsLink(query)) { setLinkMsg(""); handledLinkRef.current = ""; return; }
+    if (handledLinkRef.current === query.trim()) return; // each pasted link is resolved once
+    const t = setTimeout(() => { handledLinkRef.current = query.trim(); void handleLink(query); }, 350);
+    return () => clearTimeout(t);
+  }, [query, handleLink]);
 
   // Initialise the map when the modal opens.
   useEffect(() => {
@@ -346,7 +402,7 @@ export function LocationPicker({
   useEffect(() => {
     setNoResults(false);
     const coords = parseCoordinates(query);
-    if (coords) {
+    if (coords || looksLikeMapsLink(query)) {
       setResults([]);
       return;
     }
@@ -367,6 +423,7 @@ export function LocationPicker({
   const onSearchSubmit = useCallback(async () => {
     const q = query.trim();
     if (!q) return;
+    if (looksLikeMapsLink(q)) { handledLinkRef.current = q; await handleLink(q); return; }
     // Paste-coordinates path.
     const coords = parseCoordinates(q);
     if (coords) {
@@ -396,7 +453,7 @@ export function LocationPicker({
     } else {
       setNoResults(true);
     }
-  }, [query, results, setPin]);
+  }, [query, results, setPin, handleLink]);
 
   // Close the results dropdown when clicking outside the search area / list.
   useEffect(() => {
@@ -634,6 +691,7 @@ export function LocationPicker({
             )}
           </div>
           {cityError && <p className="mb-2 text-[11px] font-medium text-rose-600">{cityError}</p>}
+          <div className="relative">
           <div ref={searchWrapRef} className="flex items-center gap-2">
             <div className="relative flex-1">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -642,10 +700,10 @@ export function LocationPicker({
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onSearchSubmit(); } }}
-                placeholder={`Search a shop, landmark or area in ${scopeId === "all" ? "any city" : scope?.label ?? "the city"}…`}
+                placeholder={`Search a shop, landmark or area in ${scopeId === "all" ? "any city" : scope?.label ?? "the city"}, or paste a Google Maps link…`}
                 className="h-[38px] w-full rounded-xl border border-input bg-card pl-9 pr-3 text-[13px] outline-none transition-all placeholder:text-muted-foreground hover:border-[#4361EE]/40 focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15"
               />
-              {searching && <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />}
+              {(searching || linkBusy) && <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />}
             </div>
             <Button size="sm" className="gap-1.5 whitespace-nowrap" onClick={onSearchSubmit} disabled={searching || query.trim().length < 2}>
               <Search className="h-4 w-4" /> Search
@@ -654,15 +712,9 @@ export function LocationPicker({
               <LocateFixed className="h-4 w-4" /> My location
             </Button>
           </div>
-          {noResults && (
-            <p className="mt-2 text-[11.5px] text-muted-foreground">
-              No match in {scopeId === "all" ? "the configured cities" : scope?.label}. Try a nearby landmark, switch the city above, or drop the pin on the map manually.
-            </p>
-          )}
-
           {/* Search results dropdown — pick the right place */}
           {results.length > 0 && (
-            <div ref={resultsRef} className="absolute inset-x-3 top-[52px] z-[10060] max-h-72 overflow-hidden rounded-xl border border-border bg-card shadow-lg">
+            <div ref={resultsRef} className="absolute inset-x-0 top-[calc(100%+6px)] z-[10060] max-h-72 overflow-hidden rounded-xl border border-border bg-card shadow-lg">
               <div className="flex items-center justify-between border-b border-border px-2.5 py-1.5">
                 <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
                   {results.length} {results.length === 1 ? "result" : "results"}
@@ -684,7 +736,7 @@ export function LocationPicker({
                   <button
                     key={`${r.lat}-${r.lng}-${i}`}
                     type="button"
-                    onClick={async () => { await setPin(r.lat, r.lng, r.label); setQuery(r.label); setResults([]); setNoResults(false); }}
+                    onClick={async () => { await setPin(r.lat, r.lng, r.label, looksLikeMapsLink(query) ? query.trim() : undefined); setQuery(r.label); setResults([]); setNoResults(false); }}
                     className="flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-[#EEF1FD]/60"
                   >
                     <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#4361EE]" />
@@ -698,6 +750,16 @@ export function LocationPicker({
               </div>
             </div>
           )}
+          </div>
+          {linkMsg && !linkBusy && (
+            <p className={cn("mt-2 text-[11.5px]", /^Pin placed/.test(linkMsg) ? "font-medium text-emerald-600" : "text-amber-700")}>{linkMsg}</p>
+          )}
+          {noResults && (
+            <p className="mt-2 text-[11.5px] text-muted-foreground">
+              No match in {scopeId === "all" ? "the configured cities" : scope?.label}. Try a nearby landmark, switch the city above, or drop the pin on the map manually.
+            </p>
+          )}
+
         </div>
 
         {/* Map */}
@@ -727,38 +789,28 @@ export function LocationPicker({
           <div className="mb-3 rounded-xl border border-border bg-muted/20 p-3">
             {picked ? (
               <div className="space-y-1">
-                <div className="flex items-center gap-1.5">
-                  <p className="flex min-w-0 items-center gap-1.5 text-[12.5px] font-semibold text-foreground">
-                    <MapPin className="h-3.5 w-3.5 shrink-0 text-[#4361EE]" />
-                    {picked.lat.toFixed(6)}, {picked.lng.toFixed(6)}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => copyText(`${picked.lat.toFixed(6)}, ${picked.lng.toFixed(6)}`, "coords")}
-                    title="Copy coordinates"
-                    className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-[#4361EE]"
-                  >
-                    {copied === "coords" ? <><Check className="h-3 w-3 text-emerald-600" /> Copied</> : <><Copy className="h-3 w-3" /> Copy</>}
-                  </button>
-                </div>
                 <div className="flex items-start gap-1.5">
-                  <p className="min-w-0 flex-1 text-[11.5px] text-muted-foreground">
-                    {resolving ? "Resolving address…" : picked.address || "No address resolved — coordinates saved."}
+                  <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#4361EE]" />
+                  <p className="min-w-0 flex-1 text-[12.5px] font-semibold leading-snug text-foreground">
+                    {resolving ? "Resolving address…" : picked.address || "No address text yet. You can type it in the form after saving."}
                   </p>
                   {!resolving && !!picked.address && (
-                    <button
-                      type="button"
-                      onClick={() => copyText(picked.address, "address")}
-                      title="Copy address"
-                      className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-[#4361EE]"
-                    >
+                    <button type="button" onClick={() => copyText(picked.address, "address")} title="Copy address"
+                      className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-[#4361EE]">
                       {copied === "address" ? <><Check className="h-3 w-3 text-emerald-600" /> Copied</> : <><Copy className="h-3 w-3" /> Copy</>}
                     </button>
                   )}
                 </div>
+                <div className="flex items-center gap-1.5 border-t border-border pt-1.5">
+                  <a href={picked.mapsUrl} target="_blank" rel="noreferrer" title={picked.mapsUrl}
+                    className="min-w-0 flex-1 truncate text-[11.5px] font-medium text-[#4361EE] hover:underline">{picked.mapsUrl}</a>
+                  <button type="button" onClick={() => copyText(picked.mapsUrl, "link")} title="Copy link"
+                    className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-[#4361EE]">
+                    {copied === "link" ? <><Check className="h-3 w-3 text-emerald-600" /> Copied</> : <><Copy className="h-3 w-3" /> Copy link</>}
+                  </button>
+                </div>
               </div>
-            ) : (
-              <p className="text-[12px] text-muted-foreground">No pin yet. Search, use your location, or tap the map.</p>
+            ) : (              <p className="text-[12px] text-muted-foreground">Nothing selected yet. Search, paste a Google Maps link, or tap the map.</p>
             )}
           </div>
           <div className="flex items-center justify-end gap-2">
@@ -773,7 +825,7 @@ export function LocationPicker({
                 // than letting the full street address become a new region. Fall
                 // back to the actively-selected city when the pin sits just
                 // outside its box.
-                const hit = cityScopeForPoint(picked.lat, picked.lng, cities);
+                const hit = picked.lat != null && picked.lng != null ? cityScopeForPoint(picked.lat, picked.lng, cities) : null;
                 const region = hit?.label ?? (scopeId !== "all" ? scope?.label ?? "" : "");
                 onPick({ ...picked, region });
                 onClose();

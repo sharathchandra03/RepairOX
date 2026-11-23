@@ -44,10 +44,10 @@ import { useLeads } from "@/lib/leads-context";
 import { usePermissions } from "@/lib/permissions-context";
 import { allow, CAP } from "@/lib/capabilities";
 import {
-  openFollowUp, followUpLifecycle, followUpStateTone, followUpTone, openFollowUpRowState,
+  openFollowUp, followUpLifecycle, isLostStatus, followUpStateTone, followUpTone, openFollowUpRowState,
   type Lead, type LeadFollowUp,
 } from "@/lib/leads-data";
-import { statusTone } from "@/components/leads/lead-pills";
+import { statusTone, statusDotColor, stageIcon } from "@/components/leads/lead-pills";
 
 type Mode = "menu" | "schedule" | "reschedule" | "complete" | "history";
 
@@ -583,17 +583,39 @@ export function LeadStatusCell({ lead, align = "left" }: { lead: Lead; align?: "
     return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
   }, [open]);
 
-  const pick = async (s: string) => {
+  // Lost needs a reason: the popover switches to a reason box before saving.
+  const [lostPick, setLostPick] = useState<string | null>(null);
+  const [lostReason, setLostReason] = useState("");
+  useEffect(() => { if (!open) { setLostPick(null); setLostReason(""); } }, [open]);
+  const pick = async (s: string, reason?: string) => {
+    if (isLostStatus(s) && !isLostStatus(lead.status || "") && !reason) {
+      setLostReason(lead.lostReason || "");
+      setLostPick(s);
+      return;
+    }
     setBusy(true);
-    try { await changeLeadStatus(lead.id, s); setOpen(false); }
+    try {
+      await changeLeadStatus(lead.id, s, reason ? { note: reason, lostReason: reason } : undefined);
+      setOpen(false);
+    }
     finally { setBusy(false); }
   };
 
+  // Same "Lead Stage tag" as the Lead Table: a coloured cap carrying the stage
+  // icon (sparkles / calendar-clock / truck / house / store / handshake …) + the
+  // stage name. The colour and icon come from the stage keyword maps, so any
+  // admin-added stage still gets one.
+  const dot = statusDotColor(lead.status || "");
   const pill = (
-    <span className={cn("inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", statusTone(lead.status || ""))}>
-      <span className="h-1.5 w-1.5 rounded-full bg-current" />
-      {lead.status || "—"}
-      {canChange && <ChevronDown className="h-3 w-3 opacity-70" />}
+    <span
+      className="flex h-7 w-[150px] max-w-full min-w-0 items-center overflow-hidden whitespace-nowrap rounded-full bg-white pr-2.5 text-[11.5px] font-semibold text-zinc-800"
+      style={{ boxShadow: `inset 0 0 0 1px ${dot}80` }}
+    >
+      <span className="mr-1.5 grid h-full w-7 shrink-0 place-items-center text-white" style={{ backgroundColor: dot }}>
+        {stageIcon(lead.status || "", "h-3.5 w-3.5")}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-left" title={lead.status || undefined}>{lead.status || "—"}</span>
+      {canChange && <ChevronDown className="ml-1 h-3 w-3 shrink-0 opacity-60" />}
     </span>
   );
 
@@ -614,16 +636,41 @@ export function LeadStatusCell({ lead, align = "left" }: { lead: Lead; align?: "
               className="z-[9999] flex flex-col overflow-hidden rounded-xl border border-zinc-300/80 bg-card py-1 shadow-[0_20px_50px_-12px_rgba(20,30,80,0.35)]"
               onClick={(e) => e.stopPropagation()}
             >
+              {lostPick ? (
+                <div className="space-y-2 p-3">
+                  <p className="text-[11px] font-semibold text-foreground">Why is this lead lost?</p>
+                  <textarea
+                    autoFocus
+                    rows={3}
+                    value={lostReason}
+                    onChange={(e) => setLostReason(e.target.value)}
+                    placeholder="Add a reason (required)…"
+                    className="w-full resize-none rounded-lg border border-input bg-card px-2.5 py-2 text-[12px] leading-snug text-foreground outline-none transition focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15"
+                  />
+                  <div className="flex items-center justify-end gap-2">
+                    <button type="button" onClick={() => setLostPick(null)} className="rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-zinc-50">Back</button>
+                    <button
+                      type="button"
+                      disabled={busy || !lostReason.trim()}
+                      onClick={() => void pick(lostPick, lostReason.trim())}
+                      className="rounded-lg bg-[#4361EE] px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-[#3049C6] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+              ) : (
               <div className="min-h-0 flex-1 overflow-y-auto">
                 {statuses.map((s) => (
                   <button key={s} onClick={() => void pick(s)} disabled={busy}
                     className={cn("flex w-full items-center gap-2 px-3 py-2 text-left text-[12.5px] font-medium transition hover:bg-muted/60 disabled:opacity-50", s === lead.status && "bg-[#EEF1FD]")}>
-                    <span className={cn("inline-flex h-2 w-2 rounded-full", statusTone(s))} />
+                    <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md text-white" style={{ backgroundColor: statusDotColor(s) }}>{stageIcon(s, "h-3 w-3")}</span>
                     <span className="truncate">{s}</span>
                     {s === lead.status && <CheckCheck className="ml-auto h-3.5 w-3.5 text-[#4361EE]" />}
                   </button>
                 ))}
               </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>,

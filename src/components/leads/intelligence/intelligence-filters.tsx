@@ -19,10 +19,10 @@ import type { DeviceCategory, PriceListBrand } from "@/lib/price-list-data";
 const PERIODS: { label: string; value: IntelligenceDateRange }[] = [
   { label: "All", value: "all" },
   { label: "Today", value: "today" },
-  { label: "This Week", value: "thisWeek" },
+  { label: "Yesterday", value: "yesterday" },
   { label: "This Month", value: "thisMonth" },
   { label: "Last Month", value: "lastMonth" },
-  { label: "Last 3 Months", value: "last3Months" },
+  { label: "This Year", value: "thisYear" },
   { label: "Custom", value: "custom" },
 ];
 

@@ -18,7 +18,7 @@ import type { FieldJob, FieldJobEvent } from "@/lib/field-data";
 import { FIELD_EVENT_LABEL, isDelayed, isTerminal } from "@/lib/field-data";
 import {
   tripDateOf, isAssigned, isCompleted, boundsForPreset, buildSummaryRows, sumRows,
-  type AggregateCtx, type DashRow,
+  type AggregateCtx, type DashRow, type DashPreset,
 } from "@/lib/field-dashboard";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -186,7 +186,7 @@ export function monthCompare(jobs: FieldJob[], ctx: AggregateCtx, today = new Da
 
 /* ─── Leaderboards ────────────────────────────────────────────────────── */
 
-export type LeaderPeriod = "month" | "lastmonth" | "year" | "all";
+export type LeaderPeriod = DashPreset;
 export type LeaderMetric = "business" | "trips" | "rate";
 
 export function completionRateOf(r: DashRow): number | null {
@@ -195,8 +195,8 @@ export function completionRateOf(r: DashRow): number | null {
 }
 
 export function leaderboard(jobs: FieldJob[], by: "store" | "engineer", ctx: AggregateCtx, today = new Date(), limit = 5,
-  period: LeaderPeriod = "month", metric: LeaderMetric = "business"): DashRow[] {
-  const rows = buildSummaryRows(jobs, by, boundsForPreset(period, "", "", today), ctx).filter((r) => r.key !== "unassigned");
+  period: LeaderPeriod = "thismonth", metric: LeaderMetric = "business", customFrom = "", customTo = ""): DashRow[] {
+  const rows = buildSummaryRows(jobs, by, boundsForPreset(period, customFrom, customTo, today), ctx).filter((r) => r.key !== "unassigned");
   const val = (r: DashRow) => metric === "trips" ? r.totalTrips : metric === "rate" ? (completionRateOf(r) ?? -1) : (r.business ?? -1);
   return rows.sort((a, b) => val(b) - val(a) || b.totalTrips - a.totalTrips || a.label.localeCompare(b.label)).slice(0, limit);
 }

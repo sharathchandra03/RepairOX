@@ -105,10 +105,10 @@ const parse = (s: string) => { const [y, m, d] = s.split("-").map(Number); retur
 export function previousBounds(preset: DashPreset, b: DateBounds): DateBounds | null {
   if (!b.from || !b.to) return null;
   const f = parse(b.from), t = parse(b.to);
-  if (preset === "month" || preset === "lastmonth") {
+  if (preset === "month" || preset === "thismonth" || preset === "lastmonth") {
     return { from: ymd(new Date(f.getFullYear(), f.getMonth() - 1, 1)), to: ymd(new Date(f.getFullYear(), f.getMonth(), 0)) };
   }
-  if (preset === "year") return { from: `${f.getFullYear() - 1}-01-01`, to: `${f.getFullYear() - 1}-12-31` };
+  if (preset === "year" || preset === "thisyear") return { from: `${f.getFullYear() - 1}-01-01`, to: `${f.getFullYear() - 1}-12-31` };
   const days = Math.round((t.getTime() - f.getTime()) / 864e5) + 1;
   return { from: ymd(new Date(f.getFullYear(), f.getMonth(), f.getDate() - days)), to: ymd(new Date(f.getFullYear(), f.getMonth(), f.getDate() - 1)) };
 }

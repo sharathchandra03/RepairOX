@@ -23,11 +23,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { Search, ChevronDown, Check, X, Smartphone, UserX, UserPlus, Plus } from "lucide-react";
+import { Search, ChevronDown, Check, X, Smartphone, UserX, UserPlus, Plus, Lock } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { usePermissions } from "@/lib/permissions-context";
 import { useLeads } from "@/lib/leads-context";
 import { CAP, allow } from "@/lib/capabilities";
+import { REASSIGN_LOCK_HINT } from "@/lib/lead-reassign";
 import { useCatalog, sortBrandsAZ, sortModelsAZ } from "@/lib/catalog-context";
 import { cn } from "@/lib/utils";
 
@@ -113,7 +114,7 @@ export function SalesAgentEmptyState({ storeScoped }: { storeScoped?: boolean })
 }
 
 export function AgentPicker({
-  valueId, onChange, placeholder = "Select sales agent…", storeId, invalid, disabled, fallbackName, allowClear = true,
+  valueId, onChange, placeholder = "Select sales agent…", storeId, invalid, disabled, fallbackName, allowClear = true, locked = false,
 }: {
   /** Selected Sales Agent user id ("" = none). */
   valueId: string;
@@ -128,6 +129,9 @@ export function AgentPicker({
   /** Display name for a historical value that is no longer an eligible agent. */
   fallbackName?: string;
   allowClear?: boolean;
+  /** The user lacks the Lead Reassignment access: the control stays visible but
+   *  locked (lock icon + explanation), never silently hidden. */
+  locked?: boolean;
 }) {
   const { team } = usePermissions();
   const { salesAgentsFor, salesAgentsReady } = useLeads();
@@ -152,8 +156,9 @@ export function AgentPicker({
   return (
     <>
       <button
-        ref={triggerRef} type="button" onClick={toggle} disabled={disabled}
-        className={cn(triggerCls(open, invalid), disabled && "cursor-not-allowed bg-muted/40")}
+        ref={triggerRef} type="button" onClick={toggle} disabled={disabled || locked}
+        title={locked ? REASSIGN_LOCK_HINT : undefined}
+        className={cn(triggerCls(open, invalid), (disabled || locked) && "cursor-not-allowed bg-muted/40")}
         aria-haspopup="listbox" aria-expanded={open}
       >
         <span className={cn("flex min-w-0 items-center gap-1.5 truncate text-left", !selectedName && "text-muted-foreground")}>
@@ -169,7 +174,9 @@ export function AgentPicker({
             </>
           ) : placeholder}
         </span>
-        {!disabled && <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />}
+        {locked
+          ? <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-500 ring-1 ring-inset ring-zinc-200"><Lock className="h-3 w-3" /> No access</span>
+          : !disabled && <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />}
       </button>
       {mounted && open && createPortal(
         <>

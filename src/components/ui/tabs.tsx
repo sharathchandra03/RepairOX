@@ -54,7 +54,7 @@ export function SegmentedTabs({ options, value, onChange, className, size = "md"
                 transition={{ type: "spring", stiffness: 380, damping: 30 }}
               />
             )}
-            <span className="relative">{o.label}</span>
+            <span className="relative flex items-center">{o.label}</span>
           </button>
         );
       })}

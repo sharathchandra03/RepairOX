@@ -29,7 +29,7 @@
    ────────────────────────────────────────────────────────────────────────── */
 
 import type { Lead } from "@/lib/leads-data";
-import { isFinalizedInvoice, isLostStatus, isNotContactedStatus } from "@/lib/leads-data";
+import { isFinalizedInvoice, isLostStatus, isNotContactedStatus, isNoResponseStatus } from "@/lib/leads-data";
 import type { WalkIn, Ticket, Invoice } from "@/lib/mock-data";
 import type { FieldJob, FieldJobStatus } from "@/lib/field-data";
 import { FIELD_STATUS_LABEL, FIELD_STATUS_TONE } from "@/lib/field-data";
@@ -76,9 +76,17 @@ export function isQualifiedValue(qualification: string): boolean {
  *   • qualified     → full workflow available.
  *   • contacted     → contacted; qualification pending (workflow can proceed).
  */
-export function leadGateState(lead: Pick<Lead, "contactStatus" | "qualification">): LeadGateState {
+export function leadGateState(
+  lead: Pick<Lead, "contactStatus" | "qualification"> & Partial<Pick<Lead, "linkedWalkInId" | "linkedFieldJobId" | "linkedTicketId" | "linkedInvoiceId">>,
+): LeadGateState {
   if (isNotQualified(lead.qualification)) return "not_qualified";
   if (isNotContactedStatus(lead.contactStatus)) return "not_contacted";
+  // No Response = the customer has not been reached, so (like Not Contacted) no
+  // downstream details exist yet; the agent must call back. A lead that already
+  // reached a real operational record (walk-in/field/ticket/invoice) is never
+  // re-gated by a later No Response, so its Action/Result stay intact.
+  if (isNoResponseStatus(lead.contactStatus)
+    && !(lead.linkedWalkInId || lead.linkedFieldJobId || lead.linkedTicketId || lead.linkedInvoiceId)) return "not_contacted";
   if (isQualifiedValue(lead.qualification)) return "qualified";
   return "contacted";
 }
@@ -88,7 +96,7 @@ export function leadGateState(lead: Pick<Lead, "contactStatus" | "qualification"
  * never editable — when the lead is Not-Contacted or Not-Qualified. Core
  * identity (id/date/region/source/agent/contact) is never gated.
  */
-export function isDownstreamGated(lead: Pick<Lead, "contactStatus" | "qualification">): boolean {
+export function isDownstreamGated(lead: Parameters<typeof leadGateState>[0]): boolean {
   const g = leadGateState(lead);
   return g === "not_contacted" || g === "not_qualified";
 }
@@ -389,7 +397,7 @@ export function deriveLeadWorkflow(
 
   // ── Gated (Not-Contacted / Not-Qualified): no operational workflow. ──
   if (gate === "not_contacted") {
-    return mk("not_contacted", NA_RESULT, "Lead has not been contacted yet — downstream workflow not started.");
+    return mk("not_contacted", NA_RESULT, isNoResponseStatus(lead.contactStatus) ? "Customer did not respond — call back to continue." : "Lead has not been contacted yet — downstream workflow not started.");
   }
   if (gate === "not_qualified") {
     return mk("na", NA_RESULT, "Lead was marked Not Qualified — it never entered the operational workflow.");

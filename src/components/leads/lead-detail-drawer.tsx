@@ -344,8 +344,8 @@ export function LeadDetailDrawer({
               <Cell label="Email">{lead.email}</Cell>
               {lead.locationUnit && <Cell label="Door / Flat No.">{lead.locationUnit}</Cell>}
               <Cell label="Location">{lead.location}</Cell>
-              {lead.locationLat != null && lead.locationLng != null && (
-                <Cell label="Map pin" wide>
+              {(lead.locationMapsUrl || (lead.locationLat != null && lead.locationLng != null)) && (
+                <Cell label="Map link" wide>
                   <a
                     href={lead.locationMapsUrl || `https://www.google.com/maps?q=${lead.locationLat},${lead.locationLng}`}
                     target="_blank"
@@ -353,7 +353,7 @@ export function LeadDetailDrawer({
                     className="inline-flex items-center gap-1.5 font-medium text-[#4361EE] hover:underline"
                   >
                     <MapPin className="h-3.5 w-3.5" />
-                    {lead.locationLat.toFixed(5)}, {lead.locationLng.toFixed(5)} · Open in Maps
+                    Open in Google Maps
                   </a>
                 </Cell>
               )}

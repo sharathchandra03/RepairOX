@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { List, LayoutGrid, Map as MapIcon, MapPinOff, ChevronDown, Building2, Check, MapPinned } from "lucide-react";
+import { MapPinOff, ChevronDown, Building2, Check, MapPinned } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { TableSearch } from "@/components/common/table-utility-bar";
 import { StoreMultiSelect, matchesStoreSelection } from "@/components/common/store-multi-select";
@@ -169,13 +169,6 @@ function MapViewContent() {
         eyebrow="Sales"
         title="Map View"
         subtitle="Leads plotted geographically to spot coverage gaps and hot zones."
-        actions={
-          <div className="hidden items-center gap-0.5 rounded-xl border border-border bg-card p-0.5 shadow-sm sm:flex">
-            <Link href="/leads/list" className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:text-zinc-700 hover:bg-muted transition" title="List View"><List className="h-3.5 w-3.5" /></Link>
-            <Link href="/leads/kanban" className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:text-zinc-700 hover:bg-muted transition" title="Kanban View"><LayoutGrid className="h-3.5 w-3.5" /></Link>
-            <Link href="/leads/map-view" className="grid h-8 w-8 place-items-center rounded-lg bg-[#4361EE] text-white" title="Map View"><MapIcon className="h-3.5 w-3.5" /></Link>
-          </div>
-        }
       />
 
       {/* Utility bar — City → Store → Search (right-aligned). */}

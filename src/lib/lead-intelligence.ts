@@ -29,9 +29,12 @@ const DAY = 86_400_000;
 
 export type IntelligenceDateRange =
   | "today"
+  | "yesterday"
+  | "7days"
   | "thisWeek"
   | "thisMonth"
   | "lastMonth"
+  | "thisYear"
   | "last3Months"
   | "custom"
   | "all";
@@ -374,6 +377,9 @@ export function resolveIntelligencePeriod(
   let to: number | null = asOf;
   let label = "All time";
   if (range === "today") { from = today; to = endOfDay(today); label = "Today"; }
+  if (range === "yesterday") { from = today - DAY; to = today - 1; label = "Yesterday"; }
+  if (range === "7days") { from = today - 7 * DAY; to = endOfDay(today); label = "Last 7 days"; }
+  if (range === "thisYear") { from = new Date(now.getFullYear(), 0, 1).getTime(); to = endOfDay(today); label = "This year"; }
   if (range === "thisWeek") {
     from = today - ((now.getDay() + 6) % 7) * DAY;
     to = endOfDay(today);

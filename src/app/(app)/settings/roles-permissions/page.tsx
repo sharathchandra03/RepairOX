@@ -10,7 +10,7 @@ import {
   Mail, UserCog, Plus, MapPin, KeyRound, MoreHorizontal, Power, Ban, Phone,
   Sparkles, Home, Ticket, FileText, Footprints, ClipboardList, Truck,
   BookUser, UsersRound, IndianRupee, BarChart3, Settings, Lock, Pencil, CircleUser,
-  Headset, UserCheck, Check, Store,
+  Headset, UserCheck, Check, Store, Repeat2,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -893,7 +893,7 @@ const PRESET_ICON: Record<string, React.ComponentType<{ className?: string }>> =
 const MODULE_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
   Home, Ticket, FileText, Footprints, Users, Truck, Package, ClipboardList,
   BookUser, UsersRound, IndianRupee, BarChart3, Building2, ShieldCheck, Settings, UserCog,
-  UserCheck, Trash2,
+  UserCheck, Trash2, Repeat2,
 };
 
 /** Icon shown inside each access-level option button (icon-only, tooltip on hover). */

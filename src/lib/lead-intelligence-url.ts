@@ -6,7 +6,7 @@ import {
   type IntelligencePeriod,
 } from "@/lib/lead-intelligence";
 
-const DATE_RANGES = new Set<IntelligenceDateRange>(["today", "thisWeek", "thisMonth", "lastMonth", "last3Months", "custom", "all"]);
+const DATE_RANGES = new Set<IntelligenceDateRange>(["today", "yesterday", "7days", "thisWeek", "thisMonth", "lastMonth", "thisYear", "last3Months", "custom", "all"]);
 const ROUTES = new Set<IntelligenceRoute>(["", "STORE_VISIT", "PICKUP_DROP", "ON_SITE"]);
 
 export function parseIntelligenceFilters(params: Pick<URLSearchParams, "get" | "getAll">): LeadIntelligenceFilters {

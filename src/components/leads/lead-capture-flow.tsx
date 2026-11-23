@@ -35,7 +35,7 @@ import { useLeadStoreMode } from "@/lib/lead-store-mode";
 import { CAP, allow } from "@/lib/capabilities";
 import {
   emptyLeadDraft, validateLead, needsFollowUp, monthFromDate,
-  isNotContactedStatus, suggestPartCategory, emptyLeadDevice, statusRequiresFollowUp, followUpNounForStatus,
+  isNotContactedStatus, isNoResponseStatus, suggestPartCategory, emptyLeadDevice, statusRequiresFollowUp, followUpNounForStatus,
   findActiveOwnedLead,
   type Lead, type LeadDraft, type LeadFieldKey, type LeadDevice,
 } from "@/lib/leads-data";
@@ -497,20 +497,26 @@ function DeviceCard({
               </Field>
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Estimate (pipeline value)" error={invalidEstimate ? "Enter a valid amount." : undefined}>
-                  <div className="flex">
-                    <span className="flex h-[38px] items-center rounded-l-xl border border-r-0 border-input bg-muted px-2.5 text-[12px] font-medium text-zinc-600">₹</span>
-                    <input className={cn(inputCls(invalidEstimate), "rounded-l-none")} value={device.estimate ?? ""} onChange={(e) => onChange({ estimate: e.target.value === "" ? null : Number(e.target.value.replace(/[^0-9.]/g, "")) })} placeholder="0" inputMode="decimal" />
+                  <div className={cn(
+                    "flex h-[42px] overflow-hidden rounded-full border bg-gradient-to-r from-emerald-50 to-white shadow-[0_1px_2px_rgba(16,185,129,0.12)] transition focus-within:ring-2",
+                    invalidEstimate ? "border-rose-400 focus-within:ring-rose-200" : "border-emerald-300 focus-within:border-emerald-500 focus-within:ring-emerald-200/70",
+                  )}>
+                    <span className="grid w-12 shrink-0 place-items-center bg-gradient-to-br from-emerald-500 to-emerald-600 text-[17px] font-extrabold leading-none text-white">₹</span>
+                    <input className="min-w-0 flex-1 bg-transparent px-3.5 text-[15px] font-bold tabular-nums text-emerald-900 outline-none placeholder:font-medium placeholder:text-emerald-700/40" value={device.estimate ?? ""} onChange={(e) => onChange({ estimate: e.target.value === "" ? null : Number(e.target.value.replace(/[^0-9.]/g, "")) })} placeholder="0" inputMode="decimal" />
                   </div>
                 </Field>
                 <Field label="Discount" error={invalidDiscount ? "Enter a valid amount." : undefined}>
-                  <div className="flex">
-                    <input className={cn(inputCls(invalidDiscount), "rounded-r-none")} value={device.discount ?? ""} onChange={(e) => onChange({ discount: e.target.value === "" ? null : Number(e.target.value.replace(/[^0-9.]/g, "")) })} placeholder="0" inputMode="decimal" />
+                  <div className={cn(
+                    "flex h-[42px] overflow-hidden rounded-full border bg-gradient-to-r from-amber-50 to-white shadow-[0_1px_2px_rgba(245,158,11,0.14)] transition focus-within:ring-2",
+                    invalidDiscount ? "border-rose-400 focus-within:ring-rose-200" : "border-amber-300 focus-within:border-amber-500 focus-within:ring-amber-200/70",
+                  )}>
                     <button type="button"
                       onClick={() => onChange({ discountType: device.discountType === "percent" ? "amount" : "percent" })}
-                      className="flex h-[38px] min-w-[46px] items-center justify-center rounded-r-xl border border-l-0 border-input bg-muted px-2.5 text-[12px] font-semibold text-zinc-700 transition hover:bg-muted/70"
-                      title="Toggle ₹ / %">
+                      className="grid w-12 shrink-0 place-items-center bg-gradient-to-br from-amber-400 to-orange-500 text-[17px] font-extrabold leading-none text-white transition hover:brightness-105 active:scale-95"
+                      title="Click to switch between ₹ amount and % discount">
                       {device.discountType === "percent" ? "%" : "₹"}
                     </button>
+                    <input className="min-w-0 flex-1 bg-transparent px-3.5 text-[15px] font-bold tabular-nums text-amber-900 outline-none placeholder:font-medium placeholder:text-amber-700/40" value={device.discount ?? ""} onChange={(e) => onChange({ discount: e.target.value === "" ? null : Number(e.target.value.replace(/[^0-9.]/g, "")) })} placeholder="0" inputMode="decimal" />
                   </div>
                 </Field>
               </div>
@@ -560,7 +566,7 @@ export function LeadCaptureFlow({
 
 
 function FlowInner({ onClose, editLead, onSaved, prefill }: { onClose: () => void; editLead?: Lead | null; onSaved?: (lead: Lead) => void; prefill?: LeadPrefill | null }) {
-  const { leads, addLead, updateLead, currentUserIsSalesAgent, isEligibleSalesAgent, salesAgentsReady, salesAgentsFor, canChangeLeadOwner, scheduleFollowUp, openFollowUpsByLead, optionsFor, fieldTitle: ft, isFieldHidden } = useLeads();
+  const { leads, addLead, updateLead, currentUserIsSalesAgent, isEligibleSalesAgent, salesAgentsReady, salesAgentsFor, canChangeLeadOwner, canReassignAgents, scheduleFollowUp, openFollowUpsByLead, optionsFor, fieldTitle: ft, isFieldHidden } = useLeads();
   const { id: currentUserId, name: currentUserName } = useSession();
   const { team, can, currentUser } = usePermissions();
   const { customers, addCustomer } = useStore();
@@ -578,6 +584,10 @@ function FlowInner({ onClose, editLead, onSaved, prefill }: { onClose: () => voi
     ? canChangeLeadOwner(editLead)
     : allow(can, CAP.lead.assign);
   const canPickFollowUpAgent = allow(can, CAP.lead.followup);
+  // Lead Reassignment access: without it the owner (on an existing lead) and the
+  // follow-up agent stay VISIBLE but locked, with a "No access" marker.
+  const ownerLockedByAccess = isEdit && !!editLead?.assignedTo && !canReassignAgents;
+  const followUpLockedByAccess = !canReassignAgents;
 
   const [stage, setStage] = useState(1);
   const [dir, setDir] = useState(1);
@@ -711,7 +721,10 @@ function FlowInner({ onClose, editLead, onSaved, prefill }: { onClose: () => voi
   const notContacted = isNotContactedStatus(draft.contactStatus ?? "");
   // Downstream (qualification-dependent) form sections are disabled until the
   // lead is contacted AND not explicitly disqualified.
-  const downstreamLocked = notContacted || notQualified;
+  // No Response = customer not reached: same lock as Not Contacted, but a
+  // CALL BACK date & time becomes mandatory (the one section that stays open).
+  const noResponse = isNoResponseStatus(draft.contactStatus ?? "");
+  const downstreamLocked = notContacted || notQualified || noResponse;
   // A Not-Qualified lead MUST carry a reason before it can be saved.
   const needsQualificationReason = notQualified;
   const qualificationReasonMissing = needsQualificationReason && !(draft.finalRemarks ?? "").trim();
@@ -762,12 +775,15 @@ function FlowInner({ onClose, editLead, onSaved, prefill }: { onClose: () => voi
       const noun = followUpNounForStatus(draft.status ?? "");
       errors.followUpDate = `A ${noun.toLowerCase()} date & time is required for a ${noun} stage.`;
     }
+    if (noResponse && !notQualified && !followUpDueAt) {
+      errors.followUpDate = "A call back date & time is required when the customer did not respond.";
+    }
     return { ok: Object.keys(errors).length === 0, errors };
-  }, [baseValidation, draft.assignedTo, draft.followUpAgentId, draft.branchId, draft.comments, draft.status, followUpDueAt, downstreamLocked, isEdit, editLead?.assignedTo, editLead?.followUpAgentId, salesAgentsReady, isEligibleSalesAgent, leadMode.ready, leadMode.isSingle, leadMode.isMulti, leadMode.singleStoreMisconfigured, leadMode.singleStoreInactive]);
-  const showFollowUp = needsFollowUp({ result: draft.result ?? "", status: draft.status ?? "" }) || !!draft.followUpDate;
+  }, [noResponse, notQualified, baseValidation, draft.assignedTo, draft.followUpAgentId, draft.branchId, draft.comments, draft.status, followUpDueAt, downstreamLocked, isEdit, editLead?.assignedTo, editLead?.followUpAgentId, salesAgentsReady, isEligibleSalesAgent, leadMode.ready, leadMode.isSingle, leadMode.isMulti, leadMode.singleStoreMisconfigured, leadMode.singleStoreInactive]);
+  const showFollowUp = needsFollowUp({ result: draft.result ?? "", status: draft.status ?? "" }) || !!draft.followUpDate || noResponse;
   // The follow-up section wording follows the chosen stage: a Call Back stage
   // reads "Call Back", everything else reads "Follow-Up".
-  const followUpNoun = followUpNounForStatus(draft.status ?? "");
+  const followUpNoun = noResponse ? "Call Back" : followUpNounForStatus(draft.status ?? "");
 
   /* ── Non-linear navigation ──
      Any step is reachable directly (click the stepper) or via Prev/Next. No
@@ -1318,10 +1334,10 @@ function FlowInner({ onClose, editLead, onSaved, prefill }: { onClose: () => voi
                       />
                       <input className={cn(inputCls(), "min-w-0 flex-1")} value={draft.location ?? ""} onChange={(e) => set("location", e.target.value)} placeholder="Address / landmark" />
                       <Button type="button" variant="outline" size="sm" className="shrink-0 gap-1.5" onClick={() => setMapOpen(true)}>
-                        <MapPin className="h-4 w-4" /> {hasPin ? "Edit pin" : "Map"}
+                        <MapPin className="h-4 w-4" /> {hasPin || draft.locationMapsUrl ? "Edit map" : "Map"}
                       </Button>
                     </div>
-                    {hasPin && (
+                    {!!draft.locationMapsUrl && (
                       <div className="mt-1.5 flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/20 px-2.5 py-1.5">
                         <a
                           href={draft.locationMapsUrl || undefined}
@@ -1330,14 +1346,14 @@ function FlowInner({ onClose, editLead, onSaved, prefill }: { onClose: () => voi
                           className="flex min-w-0 items-center gap-1.5 text-[11.5px] font-medium text-[#4361EE] hover:underline"
                         >
                           <MapPin className="h-3 w-3 shrink-0" />
-                          <span className="truncate">{draft.locationLat!.toFixed(5)}, {draft.locationLng!.toFixed(5)} · Open in Maps</span>
+                          <span className="truncate">{draft.locationMapsUrl}</span>
                         </a>
                         <button
                           type="button"
                           onClick={() => setDraft((d) => ({ ...d, locationLat: null, locationLng: null, locationMapsUrl: "" }))}
                           className="shrink-0 text-[11px] font-medium text-muted-foreground hover:text-rose-600"
                         >
-                          Remove pin
+                          Remove link
                         </button>
                       </div>
                     )}
@@ -1368,6 +1384,7 @@ function FlowInner({ onClose, editLead, onSaved, prefill }: { onClose: () => voi
                         placeholder={canPickOwner ? "Select the Sales Agent" : "Only an assigner can pick the owner"}
                         invalid={touched && !!validation.errors.assignedTo}
                         disabled={!canPickOwner}
+                        locked={ownerLockedByAccess}
                         fallbackName={editLead?.assignedToName}
                         allowClear={canPickOwner}
                       />
@@ -1433,7 +1450,9 @@ function FlowInner({ onClose, editLead, onSaved, prefill }: { onClose: () => voi
                   <fieldset disabled={downstreamLocked} className={cn("space-y-4", downstreamLocked && "opacity-60")}>
                   {downstreamLocked && !notQualified && (
                     <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50/60 px-3 py-2.5 text-[12px] text-amber-800">
-                      Complete contact to continue lead qualification. Set Contact Status to Contacted first.
+                      {noResponse
+                        ? "Customer did not respond — device & issue stay closed. Schedule a call back in the Follow-Up step."
+                        : "Complete contact to continue lead qualification. Set Contact Status to Contacted first."}
                     </div>
                   )}
                   {/* One card per device the customer mentioned. A single card
@@ -1510,7 +1529,9 @@ function FlowInner({ onClose, editLead, onSaved, prefill }: { onClose: () => voi
                     <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50/60 px-3 py-2.5 text-[12px] text-amber-800">
                       {notQualified
                         ? "This lead is Not Qualified — status, follow-up and workflow are closed. Requalify to reopen them."
-                        : "Complete contact to unlock status, follow-up and workflow. Set Contact Status to Contacted first."}
+                        : noResponse
+                          ? "Customer did not respond — status and workflow stay closed. Set a call back below; once you reach them, mark Contact Status as Contacted."
+                          : "Complete contact to unlock status, follow-up and workflow. Set Contact Status to Contacted first."}
                     </div>
                   )}
                   {(!isFieldHidden("leadNature") || !isFieldHidden("priority")) && (
@@ -1556,13 +1577,17 @@ function FlowInner({ onClose, editLead, onSaved, prefill }: { onClose: () => voi
                       </Field>
                     )}
                   </div>
+                  </fieldset>
+                  {/* Call Back / Follow-Up card sits OUTSIDE the locked fieldset so a
+                      No Response lead can still (and must) schedule its call back. */}
+                  <fieldset disabled={notQualified || (downstreamLocked && !noResponse)} className={cn("space-y-4", (notQualified || (downstreamLocked && !noResponse)) && "opacity-60")}>
                   <div className={cn("rounded-2xl border p-4 transition", showFollowUp ? "border-[#B3BFF6] bg-[#EEF1FD]/50" : "border-dashed border-border bg-muted/30")}>
                     <div className="mb-3 flex items-center gap-2">
                       <CalendarClock className={cn("h-4 w-4", showFollowUp ? "text-[#4361EE]" : "text-muted-foreground")} />
                       <p className={cn("text-[12px] font-semibold", showFollowUp ? "text-[#4361EE]" : "text-muted-foreground")}>{followUpNoun}</p>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
-                      <Field label={`${followUpNoun} Date & Time`} required={statusRequiresFollowUp(draft.status ?? "")} error={touched ? validation.errors.followUpDate : undefined}>
+                      <Field label={`${followUpNoun} Date & Time`} required={noResponse || statusRequiresFollowUp(draft.status ?? "")} error={touched ? validation.errors.followUpDate : undefined}>
                         <DateTimeField
                           value={followUpDueAt}
                           onChange={(iso) => { setFollowUpDueAt(iso); set("followUpDate", iso ? iso.slice(0, 10) : ""); }}
@@ -1579,6 +1604,7 @@ function FlowInner({ onClose, editLead, onSaved, prefill }: { onClose: () => voi
                           placeholder="Sales Agent (may differ from owner)"
                           invalid={touched && !!validation.errors.followUpAgentId}
                           disabled={!canPickFollowUpAgent}
+                          locked={followUpLockedByAccess}
                           fallbackName={editLead?.followUpAgent}
                         />
                       </Field>
@@ -1606,7 +1632,7 @@ function FlowInner({ onClose, editLead, onSaved, prefill }: { onClose: () => voi
                     ["Name", draft.name], ["Number", draft.number], ["Alternate Number", draft.alternateNumber],
                     ["Email", draft.email], ["Region", draft.region],
                     ["Location", [draft.locationUnit, draft.location].filter(Boolean).join(", ")],
-                    ["Map pin", hasPin ? `${draft.locationLat!.toFixed(5)}, ${draft.locationLng!.toFixed(5)}` : ""],
+                    ["Map link", draft.locationMapsUrl || ""],
                     ["Customer Master", draft.customerId ? "Linked" : "New / unlinked"],
                   ]} />
                   <ReviewGroup title="Lead Details" onEdit={() => goToStage(2)} rows={[

@@ -21,6 +21,7 @@ import { SettingsBreadcrumb } from "@/components/settings/settings-breadcrumb";
 import { RequireCapability } from "@/components/common/require-capability";
 import { TableSearch } from "@/components/common/table-utility-bar";
 import { DateRangePicker } from "@/components/filters/date-range-picker";
+import { STANDARD_DATE_STRIP, type ListDatePreset } from "@/lib/date-filter";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Select } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -45,7 +46,7 @@ import {
   type TrashItem, type TrashKind, type TrashCounts,
 } from "@/lib/trash";
 
-type RangeKey = "all" | "today" | "7d" | "30d" | "custom";
+type RangeKey = ListDatePreset;
 
 const KIND_ICON: Record<TrashKind, React.ComponentType<{ className?: string }>> = {
   ticket: TicketIcon, invoice: FileText, walkin: Footprints, lead: Users,
@@ -59,16 +60,11 @@ const KIND_TONE: Record<TrashKind, { chip: string; active: string }> = {
   lead:    { chip: "bg-amber-50 text-amber-600",     active: "border-amber-400 ring-2 ring-amber-200/60" },
 };
 
-const RANGE_OPTIONS: { label: string; value: RangeKey }[] = [
-  { label: "All", value: "all" },
-  { label: "Today", value: "today" },
-  { label: "7 Days", value: "7d" },
-  { label: "30 Days", value: "30d" },
-  { label: "Custom", value: "custom" },
-];
+const RANGE_OPTIONS = STANDARD_DATE_STRIP;
 
 const RANGE_LABEL: Record<RangeKey, string> = {
-  all: "All time", today: "Today", "7d": "Last 7 days", "30d": "Last 30 days", custom: "Custom range",
+  all: "All time", today: "Today", yesterday: "Yesterday", "7days": "Last 7 days", thismonth: "This month",
+  lastmonth: "Last month", thisyear: "This year", custom: "Custom range",
 };
 
 function rangeBounds(range: RangeKey, customFrom: string, customTo: string): { from: string | null; to: string | null } {
@@ -77,8 +73,12 @@ function rangeBounds(range: RangeKey, customFrom: string, customTo: string): { f
     const d = new Date(); d.setHours(0, 0, 0, 0);
     return { from: d.toISOString(), to: null };
   }
-  if (range === "7d") return { from: new Date(now.getTime() - 7 * 864e5).toISOString(), to: null };
-  if (range === "30d") return { from: new Date(now.getTime() - 30 * 864e5).toISOString(), to: null };
+  const sod = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+  if (range === "yesterday") { const t = sod(now); return { from: new Date(t.getTime() - 864e5).toISOString(), to: new Date(t.getTime() - 1).toISOString() }; }
+  if (range === "7days") return { from: new Date(sod(now).getTime() - 7 * 864e5).toISOString(), to: null };
+  if (range === "thismonth") return { from: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(), to: null };
+  if (range === "lastmonth") return { from: new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString(), to: new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, -1).toISOString() };
+  if (range === "thisyear") return { from: new Date(now.getFullYear(), 0, 1).toISOString(), to: null };
   if (range === "custom") {
     const f = customFrom ? new Date(`${customFrom}T00:00:00`) : null;
     const t = customTo ? new Date(`${customTo}T23:59:59.999`) : null;

@@ -735,15 +735,14 @@ export function initials(name: string): string {
 
 /* ─── Field date range (reuses the shared list date-range vocabulary) ──── */
 export type FieldDateRange =
-  | "all" | "today" | "yesterday" | "7days" | "1month" | "lastmonth" | "1year" | "custom";
+  | "all" | "today" | "yesterday" | "7days" | "thismonth" | "lastmonth" | "thisyear" | "custom";
 
 export const FIELD_DATE_RANGES: { label: string; value: FieldDateRange }[] = [
   { label: "All", value: "all" },
   { label: "Today", value: "today" },
   { label: "Yesterday", value: "yesterday" },
-  { label: "7 Days", value: "7days" },
-  { label: "1 Month", value: "1month" },
+  { label: "This Month", value: "thismonth" },
   { label: "Last Month", value: "lastmonth" },
-  { label: "1 Year", value: "1year" },
+  { label: "This Year", value: "thisyear" },
   { label: "Custom", value: "custom" },
 ];

@@ -242,6 +242,8 @@ export function mapsLink(t: NinjaTrip): string {
 
 /** Google Maps turn-by-turn deep link (opens installed app on phones). */
 export function navLink(t: NinjaTrip): string {
+  // The link Sales pasted / the picker produced is the primary destination.
+  if (t.dest_maps_url) return t.dest_maps_url;
   if (t.dest_lat != null && t.dest_lng != null) return `https://www.google.com/maps/dir/?api=1&destination=${t.dest_lat},${t.dest_lng}&travelmode=driving`;
   return mapsLink(t);
 }

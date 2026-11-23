@@ -146,7 +146,7 @@ export function ServiceLocationFields({
           hasPin ? "bg-emerald-50 text-emerald-800 ring-emerald-200" : "bg-amber-50 text-amber-800 ring-amber-200")}>
           {hasPin ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />}
           <div className="min-w-0 flex-1">
-            {hasPin ? <span className="tnum">Location pinned · {value.lat!.toFixed(5)}, {value.lng!.toFixed(5)}</span> : <span>{resolveFailed ? "Couldn't read this short link automatically — it is saved as-is. Please type the address, or paste the full link / use the map pin." : (parsed.message || "Link saved without coordinates.")}</span>}
+            {hasPin ? <span>Map link saved. It goes to the field manager and the Ninja with the address.</span> : <span>{resolveFailed ? "Couldn't read this short link automatically — it is saved as-is. Please type the address, or paste the full link / use the map pin." : (parsed.message || "Link saved without coordinates.")}</span>}
             {!value.address.trim() && (resolvedHint || parsed.addressHint) && (
               <button type="button" className="ml-2 font-semibold underline" onClick={() => set({ address: resolvedHint || parsed.addressHint })}>Use “{resolvedHint || parsed.addressHint}” as address</button>
             )}

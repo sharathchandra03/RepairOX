@@ -463,16 +463,15 @@ export function isValidContact(raw: string | undefined | null): boolean {
 /* ─── Date-range filtering (same philosophy as Tickets / Invoice) ─────────── */
 
 export type WalkInDateRange =
-  | "all" | "today" | "yesterday" | "7days" | "1month" | "lastmonth" | "1year" | "custom";
+  | "all" | "today" | "yesterday" | "7days" | "thismonth" | "lastmonth" | "thisyear" | "custom";
 
 export const WALKIN_DATE_RANGES: { label: string; value: WalkInDateRange }[] = [
   { label: "All", value: "all" },
   { label: "Today", value: "today" },
   { label: "Yesterday", value: "yesterday" },
-  { label: "7 Days", value: "7days" },
-  { label: "1 Month", value: "1month" },
+  { label: "This Month", value: "thismonth" },
   { label: "Last Month", value: "lastmonth" },
-  { label: "1 Year", value: "1year" },
+  { label: "This Year", value: "thisyear" },
   { label: "Custom", value: "custom" },
 ];
 
@@ -485,7 +484,7 @@ function startOfDay(d: Date): Date {
 /**
  * True when `dateStr` (a walk-in's stored `date`, ISO `YYYY-MM-DD`) falls inside
  * the selected range. Mirrors the Tickets/Invoice `isInDateRange` semantics
- * (rolling windows, previous-calendar-month for "lastmonth", inclusive custom).
+ * (calendar month/year to date, previous-calendar-month for "lastmonth", inclusive custom).
  */
 export function isWalkInInDateRange(
   dateStr: string,
@@ -510,18 +509,16 @@ export function isWalkInInDateRange(
       const from = new Date(today); from.setDate(from.getDate() - 6);
       return d >= from && d <= today;
     }
-    case "1month": {
-      const from = new Date(today); from.setMonth(from.getMonth() - 1);
-      return d >= from && d <= today;
+    case "thismonth": {
+      return d >= new Date(today.getFullYear(), today.getMonth(), 1) && d <= today;
     }
     case "lastmonth": {
       const first = new Date(today.getFullYear(), today.getMonth() - 1, 1);
       const last = new Date(today.getFullYear(), today.getMonth(), 0);
       return d >= startOfDay(first) && d <= startOfDay(last);
     }
-    case "1year": {
-      const from = new Date(today); from.setFullYear(from.getFullYear() - 1);
-      return d >= from && d <= today;
+    case "thisyear": {
+      return d >= new Date(today.getFullYear(), 0, 1) && d <= today;
     }
     case "custom": {
       const from = customFrom ? startOfDay(new Date(customFrom)) : null;
@@ -580,15 +577,15 @@ export function resolveWalkInRange(
     }
     case "7days":
       return { from: addDays(today, -6), to: today };
-    case "1month":
-      return { from: addMonths(today, -1), to: today };
+    case "thismonth":
+      return { from: startOfDay(new Date(today.getFullYear(), today.getMonth(), 1)), to: today };
     case "lastmonth": {
       const first = startOfDay(new Date(today.getFullYear(), today.getMonth() - 1, 1));
       const last = startOfDay(new Date(today.getFullYear(), today.getMonth(), 0));
       return { from: first, to: last };
     }
-    case "1year":
-      return { from: addYears(today, -1), to: today };
+    case "thisyear":
+      return { from: startOfDay(new Date(today.getFullYear(), 0, 1)), to: today };
     case "custom": {
       const from = customFrom ? startOfDay(new Date(customFrom)) : today;
       const to = customTo ? startOfDay(new Date(customTo)) : today;

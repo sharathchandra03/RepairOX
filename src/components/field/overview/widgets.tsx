@@ -17,7 +17,7 @@ import { useFieldDashboard } from "@/components/field/dashboard/use-field-dashbo
 import { inr } from "@/components/field/dashboard/dashboard-table";
 import type { FieldOverview } from "@/components/field/overview/use-field-overview";
 import { leaderboard, completionRateOf, workloadLevel, WORKLOAD_CAPACITY, type LoadLevel, type AttentionTone, type LeaderPeriod, type LeaderMetric } from "@/lib/field-overview";
-import { tripGroupOf, tripDateOf, type DashRow } from "@/lib/field-dashboard";
+import { tripGroupOf, tripDateOf, boundsForPreset, DASH_PRESETS, type DashPreset, type DashRow } from "@/lib/field-dashboard";
 import type { FieldJob } from "@/lib/field-data";
 import { DateRangePicker } from "@/components/filters/date-range-picker";
 import { formatHHmm } from "@/lib/time-format";
@@ -234,8 +234,8 @@ export function WorkloadPanel({ o }: { o: FieldOverview }) {
     </Panel>
   );
 }
-/* ─── Trend: Pickup vs On-Site, side by side — Today (hourly) · Month (daily) · Year (monthly) · Custom (daily) ─── */
-type TrendPeriod = "today" | "month" | "year" | "custom";
+/* ─── Trend: Pickup vs On-Site, side by side — Today / Yesterday (hourly) · other ranges (daily, monthly when long) ─── */
+type TrendPeriod = DashPreset;
 interface TrendBucket { key: string; label: string; tip: string; pickup: number; onsite: number }
 const pad2 = (n: number) => String(n).padStart(2, "0");
 const ymdOf = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
@@ -259,8 +259,9 @@ export function TrendPanel({ o }: { o: FieldOverview }) {
     const add = (b: TrendBucket | undefined, j: FieldJob) => { if (b) b[tripGroupOf(j) === "onsite" ? "onsite" : "pickup"] += 1; };
     const now = o.now;
     let out: TrendBucket[] = []; let ttl = ""; let unsched = 0; let needs = false;
-    if (period === "today") {
-      const day = ymdOf(now);
+    if (period === "today" || period === "yesterday") {
+      const dayD = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (period === "yesterday" ? 1 : 0));
+      const day = ymdOf(dayD);
       out = Array.from({ length: 24 }, (_, h) => ({ key: String(h), label: hourLabel(h), tip: `${hourLabel(h)} – ${hourLabel((h + 1) % 24)}`, pickup: 0, onsite: 0 }));
       for (const j of live) {
         if (tripDateOf(j) !== day) continue;
@@ -268,34 +269,43 @@ export function TrendPanel({ o }: { o: FieldOverview }) {
         if (h == null) { unsched += 1; continue; }
         add(out[h], j);
       }
-      ttl = `Today · ${now.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`;
-    } else if (period === "month") {
-      const days = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-      out = Array.from({ length: days }, (_, i) => {
-        const d = new Date(now.getFullYear(), now.getMonth(), i + 1);
-        return { key: ymdOf(d), label: String(i + 1), tip: d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" }), pickup: 0, onsite: 0 };
-      });
-      const idx = new Map(out.map((b, i) => [b.key, i]));
-      for (const j of live) { const i = idx.get(tripDateOf(j)); if (i != null) add(out[i], j); }
-      ttl = now.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
-    } else if (period === "year") {
-      out = MONTHS_SHORT.map((m, i) => ({ key: `${now.getFullYear()}-${pad2(i + 1)}`, label: m, tip: `${m} ${now.getFullYear()}`, pickup: 0, onsite: 0 }));
-      for (const j of live) {
-        const d = tripDateOf(j);
-        if (d.startsWith(`${now.getFullYear()}-`)) add(out[Number(d.slice(5, 7)) - 1], j);
+      ttl = `${period === "today" ? "Today" : "Yesterday"} · ${dayD.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`;
+    } else if (period === "custom" && !(customFrom && customTo)) {
+      needs = true; ttl = "Custom range";
+    } else {
+      let b = boundsForPreset(period, customFrom, customTo, now);
+      if (b.from && b.to && b.from > b.to) b = { from: b.to, to: b.from };
+      if (!b.from || !b.to) {
+        // "All": span the scheduled trips (capped to the last 3 years).
+        const ds = live.map(tripDateOf).filter(Boolean).sort();
+        b = { from: ds[0] ?? ymdOf(now), to: ymdOf(now) };
       }
-      ttl = `${now.getFullYear()} · month by month`;
-    } else if (customFrom && customTo) {
-      const from = parseYmd(customFrom <= customTo ? customFrom : customTo), to = parseYmd(customFrom <= customTo ? customTo : customFrom);
-      const n = Math.min(120, Math.round((to.getTime() - from.getTime()) / 86400000) + 1);
-      out = Array.from({ length: n }, (_, i) => {
-        const d = new Date(from.getFullYear(), from.getMonth(), from.getDate() + i);
-        return { key: ymdOf(d), label: `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`, tip: d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" }), pickup: 0, onsite: 0 };
-      });
-      const idx = new Map(out.map((b, i) => [b.key, i]));
-      for (const j of live) { const i = idx.get(tripDateOf(j)); if (i != null) add(out[i], j); }
+      const from = parseYmd(b.from!), to = parseYmd(b.to!);
+      const days = Math.round((to.getTime() - from.getTime()) / 86400000) + 1;
+      if (days <= 62) {
+        out = Array.from({ length: days }, (_, i) => {
+          const d = new Date(from.getFullYear(), from.getMonth(), from.getDate() + i);
+          return { key: ymdOf(d), label: days > 31 ? `${d.getDate()}` : `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`, tip: d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" }), pickup: 0, onsite: 0 };
+        });
+        const idx = new Map(out.map((x, i) => [x.key, i]));
+        for (const j of live) { const i = idx.get(tripDateOf(j)); if (i != null) add(out[i], j); }
+      } else {
+        const months: TrendBucket[] = [];
+        let d = new Date(from.getFullYear(), from.getMonth(), 1);
+        while (d <= to && months.length < 36) {
+          months.push({ key: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`, label: MONTHS_SHORT[d.getMonth()], tip: `${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`, pickup: 0, onsite: 0 });
+          d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+        }
+        out = months;
+        const idx = new Map(out.map((x, i) => [x.key, i]));
+        for (const j of live) {
+          const td = tripDateOf(j);
+          if (!td || td < b.from! || td > b.to!) continue;
+          const i = idx.get(td.slice(0, 7)); if (i != null) add(out[i], j);
+        }
+      }
       ttl = `${from.toLocaleDateString("en-IN", { day: "numeric", month: "short" })} – ${to.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`;
-    } else { needs = true; ttl = "Custom range"; }
+    }
     return { buckets: out, title: ttl, unscheduled: unsched, needsRange: needs };
   }, [o.jobs, o.now, period, customFrom, customTo]);
 
@@ -308,7 +318,7 @@ export function TrendPanel({ o }: { o: FieldOverview }) {
 
   const W = 720, H = 260, padL = 28, padB = 24, padT = 14;
   const chartH = H - padB - padT, bw = (W - padL) / Math.max(1, buckets.length);
-  const labelEvery = buckets.length > 60 ? 7 : buckets.length > 31 ? 3 : buckets.length > 24 ? 2 : period === "today" ? 2 : 1;
+  const labelEvery = buckets.length > 60 ? 7 : buckets.length > 31 ? 3 : buckets.length > 24 ? 2 : period === "today" || period === "yesterday" ? 2 : 1;
   const showNums = buckets.length <= 31;
   const empty = !needsRange && totalPickup + totalOnsite === 0;
   const hb = hover != null ? buckets[hover] : null;
@@ -319,7 +329,7 @@ export function TrendPanel({ o }: { o: FieldOverview }) {
       action={<LinkAction href="/field/insights">Full report</LinkAction>}>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <SegmentedTabs size="sm" value={period} onChange={(v) => { setPeriod(v as TrendPeriod); setHover(null); }}
-          options={[{ label: "Today", value: "today" }, { label: "Month", value: "month" }, { label: "Year", value: "year" }, { label: "Custom", value: "custom" }]} />
+          options={DASH_PRESETS} />
         <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-[12px]">
           <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-sky-400" /> Pickup <strong className="tabular-nums">{totalPickup}</strong></span>
           <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-violet-500" /> On-Site <strong className="tabular-nums">{totalOnsite}</strong></span>
@@ -364,11 +374,11 @@ export function TrendPanel({ o }: { o: FieldOverview }) {
         )}
         {(empty || needsRange) && (
           <p className="pointer-events-none absolute inset-x-0 top-[38%] text-center text-[12px] text-muted-foreground">
-            {needsRange ? "Pick a date range to see the graph" : period === "today" ? "No pickup or on-site trips today" : "No pickup or on-site trips in this period"}
+            {needsRange ? "Pick a date range to see the graph" : period === "today" || period === "yesterday" ? `No pickup or on-site trips ${period}` : "No pickup or on-site trips in this period"}
           </p>
         )}
       </div>
-      {period === "today" && unscheduled > 0 && (
+      {(period === "today" || period === "yesterday") && unscheduled > 0 && (
         <p className="mt-1 text-[11px] text-muted-foreground">{unscheduled} trip{unscheduled > 1 ? "s" : ""} today without a set time are not shown on the hourly graph.</p>
       )}
     </Panel>
@@ -376,17 +386,22 @@ export function TrendPanel({ o }: { o: FieldOverview }) {
 }
 
 /* ─── Leaderboard (scope · period · metric) ─── */
-const PERIOD_LABEL: Record<LeaderPeriod, string> = { month: "this month", lastmonth: "last month", year: "this year", all: "all time" };
+const PERIOD_LABEL: Record<LeaderPeriod, string> = {
+  all: "all time", today: "today", yesterday: "yesterday", "7days": "last 7 days", thismonth: "this month", month: "this month",
+  lastmonth: "last month", thisyear: "this year", year: "this year", custom: "custom range",
+};
 export function LeaderboardPanel({ o }: { o: FieldOverview }) {
   const [tab, setTab] = useState<"stores" | "engineers">(o.multiStore ? "stores" : "engineers");
-  const [period, setPeriod] = useState<LeaderPeriod>("month");
+  const [period, setPeriod] = useState<LeaderPeriod>("thismonth");
+  const [lbFrom, setLbFrom] = useState("");
+  const [lbTo, setLbTo] = useState("");
   const [metric, setMetric] = useState<LeaderMetric>("business");
   const showTabs = o.multiStore && o.canTeam;
   // Engineers need team visibility; without it only stores are ranked.
   const effective = !o.canTeam && tab === "engineers" ? "stores" : tab;
   const list = useMemo(
-    () => leaderboard(o.jobs, effective === "stores" ? "store" : "engineer", o.ctx, o.now, 5, period, metric),
-    [o.jobs, o.ctx, o.now, effective, period, metric],
+    () => leaderboard(o.jobs, effective === "stores" ? "store" : "engineer", o.ctx, o.now, 5, period, metric, lbFrom, lbTo),
+    [o.jobs, o.ctx, o.now, effective, period, metric, lbFrom, lbTo],
   );
   const value = (r: DashRow) => (metric === "trips" ? r.totalTrips : metric === "rate" ? (completionRateOf(r) ?? 0) : (r.business ?? 0));
   const top = Math.max(1, ...list.map(value));
@@ -397,8 +412,9 @@ export function LeaderboardPanel({ o }: { o: FieldOverview }) {
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="max-w-full overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <SegmentedTabs size="sm" value={period} onChange={(v) => setPeriod(v as LeaderPeriod)}
-            options={[{ label: "Month", value: "month" }, { label: "Last month", value: "lastmonth" }, { label: "Year", value: "year" }, { label: "All", value: "all" }]} />
+            options={DASH_PRESETS} />
         </div>
+        <DateRangePicker open={period === "custom"} from={lbFrom} to={lbTo} onFromChange={setLbFrom} onToChange={setLbTo} />
         <SegmentedTabs size="sm" value={metric} onChange={(v) => setMetric(v as LeaderMetric)}
           options={[{ label: "Business", value: "business" }, { label: "Trips", value: "trips" }, { label: "Completion", value: "rate" }]} />
       </div>

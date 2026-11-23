@@ -21,6 +21,7 @@ import { motion } from "framer-motion";
 import { Btn, Card, Pill, Row, SectionTitle, Sheet, StatusPill, SwipeConfirm, TONE } from "./ui";
 import { TYPE_STYLE } from "./trip-card";
 import { AcceptTicket } from "./accept-ticket";
+import { LeadConversation } from "@/components/leads/lead-conversation";
 import { CollectSheet, DeliverSheet, ProblemSheet, ReceiveStoreSheet, RejectSheet, ServiceSheet, SubmitStoreSheet } from "./flows";
 import { formatDateTime } from "@/lib/time-format";
 
@@ -285,6 +286,15 @@ export function TripView({ t }: { t: NinjaTrip }) {
         <Row icon={<ShieldCheck className="h-4 w-4" />} label="Job reference" value={t.job?.job_no} />
       </Card>
 
+      {/* Messages — talk to the Sales Agent / Field Manager about this job. */}
+      {t.lead_id ? (
+        <>
+          <SectionTitle>Messages</SectionTitle>
+          <Card className="p-3.5">
+            <LeadConversation leadId={t.lead_id} variant="ninja" />
+          </Card>
+        </>
+      ) : null}
       {/* Documents */}
       {hands.length > 0 ? (
         <>

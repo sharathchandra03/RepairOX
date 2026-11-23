@@ -46,7 +46,7 @@ import { useReducedMotion } from "framer-motion";
 import {
   ArrowLeft, Phone, Mail, User, Tag, Wrench, UserCheck, BadgePercent, Pencil,
   Lock, Truck, Store, Route as RouteIcon, Ticket as TicketIcon, Receipt,
-  MapPin, ExternalLink, FileText, IndianRupee, Building2, CheckCircle2, GitBranch,
+  MapPin, ExternalLink, FileText, IndianRupee, Building2, CheckCircle2, GitBranch, MessagesSquare,
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -87,6 +87,7 @@ import { DealConversation } from "@/components/deals/deal-conversation";
 import { useDealConversationSeen } from "@/hooks/use-deal-conversation-seen";
 import { useSession } from "@/lib/use-session";
 import { LeadJourneyTimeline } from "@/components/leads/lead-journey-timeline";
+import { LeadConversation } from "@/components/leads/lead-conversation";
 import { LeadFollowUpHistory } from "@/components/leads/lead-followup-history";
 import { LeadTemperatureSection } from "@/components/leads/lead-temperature-section";
 import { LeadQuickActions } from "@/components/leads/lead-quick-actions";
@@ -285,6 +286,12 @@ export default function ViewLeadPage() {
   const ticket = resolveLeadTicket(lead, tickets);
   const finalizedInvoice = resolveLeadFinalizedInvoice(lead, ticket, invoices);
   const fieldJob = resolveLeadFieldJob(lead, fieldJobs);
+  // Arriving with #conversation (from "Message team" in a table menu) scrolls to the thread.
+  useEffect(() => {
+    if (typeof window === "undefined" || window.location.hash !== "#conversation") return;
+    const t = setTimeout(() => document.getElementById("conversation")?.scrollIntoView({ behavior: "smooth", block: "center" }), 450);
+    return () => clearTimeout(t);
+  }, [lead.id]);
   const walkIn = resolveLeadWalkIn(lead, walkIns);
   const linkedCustomer = lead.customerId ? customers.find((c) => c.id === lead.customerId) : undefined;
   const revenue = revenueWonForLead(lead, tickets, invoices);
@@ -702,6 +709,29 @@ export default function ViewLeadPage() {
               Route / Push to Deal / Follow-up / Quotation / View Customer). */}
           <Reveal delay={0.04}><LeadQuickActions lead={lead} readOnly={viewAsReadOnly} /></Reveal>
 
+          {/* Lead Conversation — message the Field Manager / Ninja on this lead
+              and read their replies. Internal only. Hidden for users without
+              the message capability; read-only under the owner lens. */}
+          {allow(can, CAP.lead.message) && (
+            <Reveal delay={0.05}>
+              <section id="conversation" className="scroll-mt-24 rounded-2xl border border-border bg-card p-5 shadow-card">
+                <h3 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <MessagesSquare className="h-3.5 w-3.5" /> Lead Conversation
+                </h3>
+                <LeadConversation
+                  leadId={lead.id}
+                  leadNo={lead.leadNo}
+                  readOnly={viewAsReadOnly}
+                  fallbackPeople={[
+                    lead.assignedTo ? { staffId: lead.assignedTo, name: lead.assignedToName || "Sales Agent", roleLabel: "Sales Agent", isMe: false } : null,
+                    fieldJob?.fieldManagerId ? { staffId: fieldJob.fieldManagerId, name: fieldJob.fieldManagerName || "Field Manager", roleLabel: "Field Manager", isMe: false } : null,
+                    fieldJob?.ninjaId ? { staffId: fieldJob.ninjaId, name: fieldJob.ninjaName || "Ninja", roleLabel: "Ninja (pickup)", isMe: false } : null,
+                    fieldJob?.dropNinjaId && fieldJob.dropNinjaId !== fieldJob.ninjaId ? { staffId: fieldJob.dropNinjaId, name: fieldJob.dropNinjaName || "Ninja", roleLabel: "Ninja (drop)", isMe: false } : null,
+                  ].filter((x): x is { staffId: string; name: string; roleLabel: string; isMe: boolean } => !!x)}
+                />
+              </section>
+            </Reveal>
+          )}
           {/* Pending handoff requests — shown to the owner / reassigning managers
               only (the table's RLS returns nothing to anyone else). */}
           {!isReference && <HandoffRequestsPanel lead={lead} />}

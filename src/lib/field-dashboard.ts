@@ -39,11 +39,13 @@ export const isWarranty = (j: Pick<FieldJob, "leadType">) => normaliseLeadType(j
 
 /* ─── Date range ──────────────────────────────────────────────────────── */
 
-export type DashPreset = "all" | "today" | "7days" | "month" | "lastmonth" | "year" | "custom";
+export type DashPreset = "all" | "today" | "yesterday" | "7days" | "thismonth" | "month" | "lastmonth" | "thisyear" | "year" | "custom";
+/** The shared standard date strip (All · Today · Yesterday · This Month · Last Month · This Year · Custom).
+ *  `month` / `year` (calendar month/year) stay valid internal keys but are not shown on the strip. */
 export const DASH_PRESETS: { label: string; value: DashPreset }[] = [
-  { label: "All", value: "all" }, { label: "Today", value: "today" }, { label: "7 Days", value: "7days" },
-  { label: "This Month", value: "month" }, { label: "Last Month", value: "lastmonth" }, { label: "This Year", value: "year" },
-  { label: "Custom", value: "custom" },
+  { label: "All", value: "all" }, { label: "Today", value: "today" }, { label: "Yesterday", value: "yesterday" },
+  { label: "This Month", value: "thismonth" }, { label: "Last Month", value: "lastmonth" },
+  { label: "This Year", value: "thisyear" }, { label: "Custom", value: "custom" },
 ];
 export interface DateBounds { from: string | null; to: string | null } // inclusive YYYY-MM-DD
 
@@ -53,6 +55,9 @@ const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.ge
 export function boundsForPreset(preset: DashPreset, customFrom: string, customTo: string, today = new Date()): DateBounds {
   switch (preset) {
     case "today": return { from: ymd(today), to: ymd(today) };
+    case "yesterday": { const y = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1); return { from: ymd(y), to: ymd(y) }; }
+    case "thismonth": return { from: ymd(new Date(today.getFullYear(), today.getMonth(), 1)), to: ymd(today) };
+    case "thisyear": return { from: `${today.getFullYear()}-01-01`, to: ymd(today) };
     case "7days": return { from: ymd(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6)), to: ymd(today) };
     case "year": return { from: `${today.getFullYear()}-01-01`, to: `${today.getFullYear()}-12-31` };
     case "month": return { from: ymd(new Date(today.getFullYear(), today.getMonth(), 1)), to: ymd(new Date(today.getFullYear(), today.getMonth() + 1, 0)) };

@@ -343,6 +343,9 @@ export type PermissionKey =
   | "leads_delete"
   | "leads_assign"
   | "leads_reassign"
+  /* Lead Reassignment: change an existing owner AND hand a follow-up to another agent.
+     Managers/owners hold it by default; Sales Agents do not (they see the controls locked). */
+  | "leads_reassign_access"
   | "leads_view_team"
   | "leads_followup"
   | "leads_stage_change"
@@ -380,6 +383,8 @@ export type PermissionKey =
   | "leads_search"
   | "leads_shared_reference"
   | "leads_customer_history"
+  /* Lead conversation: message the people on the lead (Field Manager / Ninja). */
+  | "leads_message"
   /* Deals & quotations */
   | "deals_view"
   | "deals_create"
@@ -886,6 +891,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "leads_delete", label: "Delete Lead" },
       { key: "leads_assign", label: "Assign Lead" },
       { key: "leads_reassign", label: "Reassign Lead (change owner)" },
+      { key: "leads_reassign_access", label: "Lead Reassignment (change a lead's owner or give a follow-up to another agent)" },
       { key: "leads_view_team", label: "View Team Leads (all leads in their store scope)" },
       { key: "leads_followup", label: "Manage Lead Follow-ups" },
       { key: "leads_stage_change", label: "Change Stage (Kanban)" },
@@ -908,6 +914,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "leads_search", label: "Lead Intelligence Search (search your permitted customers & leads)" },
       { key: "leads_shared_reference", label: "View Shared Lead Reference (read-only access to other agents' leads)" },
       { key: "leads_customer_history", label: "View Customer Lead History (read-only, across agents)" },
+      { key: "leads_message", label: "Lead Conversation (message the Field Manager / Ninja on a lead)" },
       { key: "deals_view", label: "View Deals (own / submitted)" },
       { key: "deals_create", label: "Create / Submit Deal (discount approval request)" },
       { key: "deals_edit", label: "Edit / Resubmit Own Deal" },
@@ -1185,7 +1192,7 @@ export const ROLES: RoleDef[] = [
     summary: "Full control of their assigned branch.",
     workspaces: ["leads", "shop", "operations"],
     permissions: [
-      "create", "edit", "delete", "approve", "assign",
+      "create", "edit", "delete", "approve", "assign", "leads_reassign_access",
       "view_dashboard", "view_kpi_cards", "view_charts", "view_activity_log", "export_dashboard",
       "create_ticket", "edit_ticket", "delete_ticket", "view_ticket",
       "assign_technician", "assign_technicians", "change_ticket_status", "update_repair_status",

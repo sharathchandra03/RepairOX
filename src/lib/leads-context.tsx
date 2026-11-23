@@ -31,6 +31,7 @@ import { notify } from "@/lib/notifications";
 import { createProspectContact, findContactMatches } from "@/lib/contact-service";
 import { recordTemperatureChange } from "@/hooks/use-lead-temperature";
 import { CAP, allow } from "@/lib/capabilities";
+import { mayChangeOwner, mayGiveFollowUpTo, REASSIGN_LOCK_HINT } from "@/lib/lead-reassign";
 import {
   agentsForStore, computeLocalSalesAgents, friendlyLeadOwnershipError, isAgentEligible,
   rowToSalesAgent, type SalesAgent,
@@ -479,6 +480,10 @@ interface LeadsContextValue {
   updateLead: (id: string, updates: Partial<Lead>) => Promise<boolean>;
   /** May the current user change THIS lead's owner (mirrors the DB guard)? */
   canChangeLeadOwner: (lead: Pick<Lead, "assignedTo" | "createdBy">) => boolean;
+  /** Holds the Lead Reassignment key (change an owner / hand a follow-up to another agent). */
+  canReassignAgents: boolean;
+  /** May the user give a follow-up on THIS lead to `agentId`? (Without the key: only people already on the lead.) */
+  canGiveFollowUpTo: (lead: Pick<Lead, "id" | "assignedTo" | "followUpAgentId">, agentId: string | null | undefined) => boolean;
   deleteLead: (id: string) => Promise<void>;
   /** Local (no-backend) mode only: put a lead taken from the Trash Bin back. */
   restoreTrashedLead: (record: Lead) => void;
@@ -909,13 +914,27 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
    *  (0050): reassign-level keys → any visible lead; `leads_assign` → only
    *  leads they own/created, or any lead with a see-all key. A follow-up agent
    *  can't take over someone else's lead. */
+  const canReassignAgents = allow(can, CAP.lead.reassignAccess);
+  const canReassignAgentsRef = useRef(canReassignAgents);
+  canReassignAgentsRef.current = canReassignAgents;
   const canChangeLeadOwner = useCallback((lead: Pick<Lead, "assignedTo" | "createdBy">): boolean => {
+    // Changing an EXISTING owner is a reassignment: it needs the Lead Reassignment
+    // key on top of the owner-change rules below (first assignment does not).
+    if (!mayChangeOwner(canReassignAgents, lead.assignedTo)) return false;
     if (allow(can, CAP.lead.reassignAny)) return true;
     const me = currentUserId || "";
     const mine = !!me && (lead.assignedTo === me || lead.createdBy === me);
     return allow(can, ["leads_assign"]) && (mine || canSeeAllLeads);
-  }, [can, currentUserId, canSeeAllLeads]);
+  }, [can, currentUserId, canSeeAllLeads, canReassignAgents]);
+  const canGiveFollowUpTo = useCallback((lead: Pick<Lead, "id" | "assignedTo" | "followUpAgentId">, agentId: string | null | undefined): boolean =>
+    mayGiveFollowUpTo({
+      hasAccess: canReassignAgentsRef.current, meId: currentUserIdRef.current || "", agentId,
+      ownerId: lead.assignedTo, leadFollowUpAgentId: lead.followUpAgentId,
+      priorFollowUpUserIds: followUpsRef.current.filter((f) => f.leadId === lead.id).map((f) => f.followUpUserId).filter(Boolean),
+    }), []);
   const canChangeLeadOwnerRef = useRef(canChangeLeadOwner);
+  const canGiveFollowUpToRef = useRef(canGiveFollowUpTo);
+  canGiveFollowUpToRef.current = canGiveFollowUpTo;
   canChangeLeadOwnerRef.current = canChangeLeadOwner;
 
   /** Show a DB ownership-guard error as a clear message (falls back to `fallback`). */
@@ -1170,6 +1189,10 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     }
     if (draft.followUpAgentId && !eligibleOrUnknown(draft.followUpAgentId, storeId)) {
       toast.error("Lead not saved", { description: "The follow-up agent must be an active Sales Agent who can work this store." });
+      return null;
+    }
+    if (draft.followUpAgentId && !mayGiveFollowUpTo({ hasAccess: canReassignAgentsRef.current, meId: me || "", agentId: draft.followUpAgentId, ownerId: ownerId || me })) {
+      toast.error("Lead not saved", { description: REASSIGN_LOCK_HINT });
       return null;
     }
 
@@ -1458,6 +1481,10 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     }
     if (fuChange && updates.followUpAgentId && !eligibleOrUnknown(updates.followUpAgentId, storeId)) {
       toast.error("Changes not saved", { description: "The follow-up agent must be an active Sales Agent who can work this store." });
+      return false;
+    }
+    if (fuChange && updates.followUpAgentId && current && !canGiveFollowUpToRef.current({ id, assignedTo: (assignedTo ?? current.assignedTo) || "", followUpAgentId: current.followUpAgentId }, updates.followUpAgentId)) {
+      toast.error("Changes not saved", { description: REASSIGN_LOCK_HINT });
       return false;
     }
     if (fuChange) {
@@ -1965,6 +1992,10 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       toast.error("Follow-up not saved", { description: "The follow-up agent must be an active Sales Agent who can work this store." });
       return null;
     }
+    if (draft.followUpUserId && !canGiveFollowUpToRef.current(lead, draft.followUpUserId)) {
+      toast.error("Follow-up not saved", { description: REASSIGN_LOCK_HINT });
+      return null;
+    }
     const fuUserId = draft.followUpUserId
       || [lead.followUpAgentId, lead.assignedTo, currentUserIdRef.current || ""].find((uid) => !!uid && eligibleOrUnknown(uid, lead.branchId))
       || "";
@@ -2079,9 +2110,12 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     const fu = followUpsRef.current.find((f) => f.id === followUpId);
     if (!fu) return;
     const lead = leadsRef.current.find((l) => l.id === fu.leadId);
-    setFollowUps((prev) => { const next = prev.map((f) => (f.id === followUpId ? { ...f, status: "cancelled" as const, comments: reason ?? f.comments } : f)); if (!useDb) writeLS(FOLLOWUPS_KEY, next); return next; });
+    // Stamp the CLOSE time (completed_at doubles as "closed at") so History can
+    // order cancelled follow-ups by when they were closed, not when they were due.
+    const closedIso = new Date().toISOString();
+    setFollowUps((prev) => { const next = prev.map((f) => (f.id === followUpId ? { ...f, status: "cancelled" as const, completedAt: closedIso, comments: reason ?? f.comments } : f)); if (!useDb) writeLS(FOLLOWUPS_KEY, next); return next; });
     if (useDb) {
-      const { error } = await db.from("lead_followup_history").update({ status: "cancelled", comments: reason ?? fu.comments ?? null }).eq("id", followUpId);
+      const { error } = await db.from("lead_followup_history").update({ status: "cancelled", completed_at: closedIso, comments: reason ?? fu.comments ?? null }).eq("id", followUpId);
       if (error && !isMissingTableError(error)) console.error("[leads] cancelFollowUp failed:", error.message);
     }
     logActivity({ module: "Lead", action: "Follow-up Cancelled", severity: "info", entity: "Lead", reference: lead?.leadNo || fu.leadId, description: `Follow-up #${fu.seq} cancelled${reason ? ` — ${reason}` : ""}.` });
@@ -2591,7 +2625,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     leads: scopedLeads, filteredLeads, options, hydrated, loadErrors, mode: useDb ? "db" : "local",
     filters, setFilters, clearFilters,
     optionsFor, addLead, updateLead, deleteLead, restoreTrashedLead, assignLead, pinLead, routeLead, changeLeadStatus,
-    salesAgents, salesAgentsReady, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, refreshSalesAgents, canSeeAllLeads, canChangeLeadOwner,
+    salesAgents, salesAgentsReady, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, refreshSalesAgents, canSeeAllLeads, canChangeLeadOwner, canReassignAgents, canGiveFollowUpTo,
     viewAsAgentId: effectiveViewAsId, canViewAsAgent, viewAsReadOnly, setViewAsAgent,
     followUps, followUpsFor, openFollowUpsByLead, scheduleFollowUp, completeFollowUp, cancelFollowUp, updateFollowUpComment,
     assignmentHistory, assignmentHistoryFor, registerReferenceRows,
@@ -2601,7 +2635,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     fieldTitle, setFieldTitle, hiddenFields, isFieldHidden, setFieldHidden,
     contacts, addContact, updateContact, deleteContact,
   }), [scopedLeads, filteredLeads, options, hydrated, loadErrors, useDb, filters, setFilters, clearFilters, optionsFor, addLead, updateLead, deleteLead, restoreTrashedLead, assignLead, pinLead, routeLead, changeLeadStatus,
-    salesAgents, salesAgentsReady, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, refreshSalesAgents, canSeeAllLeads, canChangeLeadOwner, effectiveViewAsId, canViewAsAgent, viewAsReadOnly, setViewAsAgent, followUps, followUpsFor, openFollowUpsByLead, scheduleFollowUp, completeFollowUp, cancelFollowUp, updateFollowUpComment, assignmentHistory, assignmentHistoryFor, registerReferenceRows, conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord, autoLinkByIdentity, leadMetrics, addOption, updateOption, updateOptionStyle, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption, fieldTitle, setFieldTitle, hiddenFields, isFieldHidden, setFieldHidden, contacts, addContact, updateContact, deleteContact]);
+    salesAgents, salesAgentsReady, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, refreshSalesAgents, canSeeAllLeads, canChangeLeadOwner, canReassignAgents, canGiveFollowUpTo, effectiveViewAsId, canViewAsAgent, viewAsReadOnly, setViewAsAgent, followUps, followUpsFor, openFollowUpsByLead, scheduleFollowUp, completeFollowUp, cancelFollowUp, updateFollowUpComment, assignmentHistory, assignmentHistoryFor, registerReferenceRows, conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord, autoLinkByIdentity, leadMetrics, addOption, updateOption, updateOptionStyle, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption, fieldTitle, setFieldTitle, hiddenFields, isFieldHidden, setFieldHidden, contacts, addContact, updateContact, deleteContact]);
 
   return <LeadsContext.Provider value={value}>{children}</LeadsContext.Provider>;
 }

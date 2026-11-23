@@ -4,6 +4,22 @@ import { useState, useRef, useCallback, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 
+/** Theme colour for the label: the user's chosen "Hover line" colour
+ *  (--chrome-line); if they chose "No line" (transparent) use the active-pill
+ *  colour so the label never disappears. Text flips black/white for contrast. */
+function themeLabelColors(): { bg: string; fg: string } {
+  const cs = getComputedStyle(document.documentElement);
+  let bg = cs.getPropertyValue("--chrome-line").trim();
+  if (!bg || bg === "transparent" || /^rgba?\(.*,\s*0\)$/.test(bg)) bg = cs.getPropertyValue("--chrome-pill-from").trim() || "#4361EE";
+  const hex = bg.replace("#", "");
+  let fg = "#FFFFFF";
+  if (/^[0-9a-f]{6,8}$/i.test(hex)) {
+    const n = parseInt(hex.slice(0, 6), 16);
+    const lum = (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+    if (lum > 0.62) fg = "#0F172A";
+  }
+  return { bg, fg };
+}
 /**
  * SidebarTooltip — the canonical hover label for the COLLAPSED (icon-only)
  * sidebar. Wrap any collapsed sidebar trigger (a nav icon, an expandable
@@ -32,7 +48,7 @@ export function SidebarTooltip({
   children: ReactNode;
   delay?: number;
 }) {
-  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
+  const [coords, setCoords] = useState<{ top: number; left: number; bg: string; fg: string } | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -50,7 +66,7 @@ export function SidebarTooltip({
       if (r.width === 0 && r.height === 0) return;
       // Positioned to the RIGHT of the icon, vertically centred on it, with a
       // small gap so the tooltip never overlaps the trigger or its neighbours.
-      setCoords({ top: r.top + r.height / 2, left: r.right + 10 });
+      setCoords({ top: r.top + r.height / 2, left: r.right + 10, ...themeLabelColors() });
     }, delay);
   }, [enabled, delay]);
 
@@ -97,12 +113,12 @@ export function SidebarTooltip({
                 exit={{ opacity: 0, x: -4 }}
                 transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
                 role="tooltip"
-                style={{ position: "fixed", top: coords.top, left: coords.left, transform: "translateY(-50%)" }}
-                className="pointer-events-none z-[70] whitespace-nowrap rounded-lg bg-slate-900 px-2.5 py-1.5 text-[12px] font-semibold leading-none text-white shadow-[0_8px_24px_-6px_rgba(15,23,42,0.45)] ring-1 ring-white/10"
+                style={{ position: "fixed", top: coords.top, left: coords.left, transform: "translateY(-50%)", background: coords.bg, color: coords.fg }}
+                className="pointer-events-none z-[70] whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[12px] font-semibold leading-none shadow-[0_8px_24px_-6px_rgba(15,23,42,0.45)] ring-1 ring-black/10"
               >
                 {label}
                 {/* Left-pointing caret so the label clearly belongs to the icon. */}
-                <span className="absolute right-full top-1/2 -translate-y-1/2 border-y-[5px] border-r-[5px] border-y-transparent border-r-slate-900" />
+                <span className="absolute right-full top-1/2 -translate-y-1/2 border-y-[5px] border-r-[5px] border-y-transparent" style={{ borderRightColor: coords.bg }} />
               </motion.div>
             )}
           </AnimatePresence>,

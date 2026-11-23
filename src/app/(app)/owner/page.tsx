@@ -39,15 +39,14 @@ import { cn } from "@/lib/utils";
 const PROJECTION_DAYS = 31;
 
 /* ── Date presets (mirrors the app's shared date vocabulary) ── */
-type PresetId = "all" | "today" | "yesterday" | "7days" | "1month" | "lastmonth" | "1year" | "custom";
+type PresetId = "all" | "today" | "yesterday" | "7days" | "thismonth" | "lastmonth" | "thisyear" | "custom";
 const PRESETS: { id: PresetId; label: string }[] = [
   { id: "all", label: "All" },
   { id: "today", label: "Today" },
   { id: "yesterday", label: "Yesterday" },
-  { id: "7days", label: "7 Days" },
-  { id: "1month", label: "1 Month" },
+  { id: "thismonth", label: "This Month" },
   { id: "lastmonth", label: "Last Month" },
-  { id: "1year", label: "1 Year" },
+  { id: "thisyear", label: "This Year" },
   { id: "custom", label: "Custom" },
 ];
 
@@ -65,13 +64,13 @@ function resolveRange(preset: PresetId, from?: string, to?: string): { from: str
       return { from: iso(startOfDay(y)), to: iso(e) };
     }
     case "7days": { const s = new Date(now); s.setDate(s.getDate() - 6); return { from: iso(startOfDay(s)), to: iso(end) }; }
-    case "1month": { const s = new Date(now); s.setMonth(s.getMonth() - 1); return { from: iso(startOfDay(s)), to: iso(end) }; }
+    case "thismonth": return { from: iso(startOfDay(new Date(now.getFullYear(), now.getMonth(), 1))), to: iso(end) };
     case "lastmonth": {
       const s = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       const e = new Date(now.getFullYear(), now.getMonth(), 0); e.setHours(23, 59, 59, 999);
       return { from: iso(startOfDay(s)), to: iso(e) };
     }
-    case "1year": { const s = new Date(now); s.setFullYear(s.getFullYear() - 1); return { from: iso(startOfDay(s)), to: iso(end) }; }
+    case "thisyear": return { from: iso(startOfDay(new Date(now.getFullYear(), 0, 1))), to: iso(end) };
     case "custom": return { from: from ? iso(startOfDay(new Date(from))) : null, to: to ? iso(new Date(`${to}T23:59:59`)) : null };
   }
 }
@@ -162,7 +161,7 @@ function OwnerDashboardInner() {
   const { can, apiFetch, authReady, currentUser } = usePermissions();
   const { stores, activeStoreId, isAllShops, canViewAllShops, setActiveStore, ready: storeReady } = useStoreContext();
 
-  const [preset, setPreset] = useState<PresetId>("1month");
+  const [preset, setPreset] = useState<PresetId>("thismonth");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [rows, setRows] = useState<StoreMetrics[]>([]);

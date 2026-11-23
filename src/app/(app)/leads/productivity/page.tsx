@@ -71,16 +71,17 @@ import {
 const MS_DAY = 24 * 60 * 60 * 1000;
 
 /* Period presets that drive the calendar range. "all" = all time (no date
-   constraint); today/week/month/year snap the from/to to the corresponding
+   constraint); today/yesterday/7 days/1 month/last month/1 year snap the from/to to the corresponding
    local window; "custom" opens the shared calendar range picker. */
-type PeriodKey = "all" | "today" | "week" | "month" | "year" | "custom";
+type PeriodKey = "all" | "today" | "yesterday" | "thismonth" | "lastmonth" | "thisyear" | "custom";
 
 const PERIOD_OPTIONS: { label: string; value: PeriodKey }[] = [
   { label: "All", value: "all" },
   { label: "Today", value: "today" },
-  { label: "Week", value: "week" },
-  { label: "Month", value: "month" },
-  { label: "Year", value: "year" },
+  { label: "Yesterday", value: "yesterday" },
+  { label: "This Month", value: "thismonth" },
+  { label: "Last Month", value: "lastmonth" },
+  { label: "This Year", value: "thisyear" },
   { label: "Custom", value: "custom" },
 ];
 
@@ -97,23 +98,23 @@ function periodRange(period: PeriodKey, nowMs: number, tz: string): { from: stri
   if (period === "today") {
     return { from: new Date(todayStart).toISOString(), to };
   }
-  if (period === "week") {
-    // Monday-based local week start, matching the engine's week buckets.
-    const [y, m, d] = todayKey.split("-").map(Number);
-    const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0=Sun..6=Sat
-    const mondayOffset = (dow + 6) % 7;
-    const mondayKey = localDateKey(todayStart - mondayOffset * MS_DAY + MS_DAY / 2, tz);
-    return { from: new Date(localDateStartMs(mondayKey, tz)).toISOString(), to };
+  if (period === "yesterday") {
+    return { from: new Date(todayStart - MS_DAY).toISOString(), to: new Date(todayStart).toISOString() };
   }
-  if (period === "month") {
-    const monthStartKey = `${todayKey.slice(0, 7)}-01`;
-    return { from: new Date(localDateStartMs(monthStartKey, tz)).toISOString(), to };
+  const [y, m, d] = todayKey.split("-").map(Number);
+  const key = (yy: number, mm: number, dd: number) => new Date(Date.UTC(yy, mm - 1, dd)).toISOString().slice(0, 10);
+  if (period === "thismonth") {
+    return { from: new Date(localDateStartMs(key(y, m, 1), tz)).toISOString(), to };
   }
-  // year
-  const yearStartKey = `${todayKey.slice(0, 4)}-01-01`;
-  return { from: new Date(localDateStartMs(yearStartKey, tz)).toISOString(), to };
+  if (period === "lastmonth") {
+    return {
+      from: new Date(localDateStartMs(key(y, m - 1, 1), tz)).toISOString(),
+      to: new Date(localDateStartMs(key(y, m, 1), tz)).toISOString(),
+    };
+  }
+  // thisyear (calendar year to date)
+  return { from: new Date(localDateStartMs(key(y, 1, 1), tz)).toISOString(), to };
 }
-
 interface ReportResponse {
   ok: boolean;
   agents: ReportAgent[];
@@ -138,15 +139,15 @@ export default function AgentProductivityPage() {
   const [nowMs] = useState(() => Date.now()); // ONE nowMs per report render
   const [agentFilter, setAgentFilter] = useState<string[]>([]); // [] = All Sales Agents; else specific staffIds
   const [storeFilter, setStoreFilter] = useState<string[]>([]);
-  const [period, setPeriod] = useState<PeriodKey>("month");
-  const [fromISO, setFromISO] = useState<string>(() => startOfMonthISO(Date.now()));
-  const [toISO, setToISO] = useState<string>(() => new Date(Date.now() + MS_DAY).toISOString());
+  const [period, setPeriod] = useState<PeriodKey>("thismonth");
+  const [fromISO, setFromISO] = useState<string>(() => periodRange("thismonth", Date.now(), tz)?.from ?? startOfMonthISO(Date.now()));
+  const [toISO, setToISO] = useState<string>(() => periodRange("thismonth", Date.now(), tz)?.to ?? new Date(Date.now() + MS_DAY).toISOString());
   // Custom-range calendar state ("YYYY-MM-DD", local). Only used when the
   // period preset is "custom"; the shared DateRangePicker opens on selection.
   const [customFrom, setCustomFrom] = useState<string>("");
   const [customTo, setCustomTo] = useState<string>("");
 
-  // Apply a period preset. today/week/month/year snap the calendar range;
+  // Apply a period preset. today/yesterday/7 days/1 month/last month/1 year snap the calendar range;
   // "all" clears the date constraint (all-time); "custom" opens the calendar.
   const applyPeriod = (p: PeriodKey) => {
     setPeriod(p);

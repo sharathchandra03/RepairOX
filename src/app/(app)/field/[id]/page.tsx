@@ -18,12 +18,13 @@ import { useParams, useRouter } from "next/navigation";
 import {
   Truck, User, Phone, Mail, MapPin, Package, Wrench, CalendarClock, Ticket as TicketIcon, UserCheck, PackageCheck,
   Send, XCircle, ShieldCheck, FileText, GitBranch, Receipt, History, MessageSquareText, ExternalLink, Lock, Check,
-  Building2, Link2, IndianRupee, Pencil, Smartphone, ShieldAlert,
+  Building2, Link2, IndianRupee, Pencil, Smartphone, ShieldAlert, MessagesSquare,
 } from "lucide-react";
 import { BackPill } from "@/components/common/back-pill";
 import { Can } from "@/components/common/can";
 import { PinnedRail } from "@/components/common/pinned-rail";
 import { Reveal } from "@/components/common/reveal";
+import { LeadConversation } from "@/components/leads/lead-conversation";
 import { FieldTripsPanel, RejectedBanner } from "@/components/field/field-trips-panel";
 import { AssignNinjaDialog } from "@/components/field/assign-ninja-dialog";
 import { useJobTrips } from "@/hooks/use-job-trips";
@@ -427,6 +428,25 @@ export default function ViewFieldAssignmentPage() {
             </section>
           </Reveal>
 
+          {/* Lead Conversation — talk to the Sales Agent / Ninja about this lead.
+              Shown for trips that came from a lead; the DB only lets people on
+              the lead's chain read or write it. */}
+          {j.leadId && (
+            <Reveal delay={0.05}>
+              <section className="rounded-2xl border border-border bg-card p-5 shadow-card">
+                <h3 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground"><MessagesSquare className="h-3.5 w-3.5" /> Lead Conversation</h3>
+                <LeadConversation
+                  leadId={j.leadId}
+                  leadNo={j.leadNo}
+                  fallbackPeople={[
+                    j.salesPersonId ? { staffId: j.salesPersonId, name: j.salesPersonName || "Sales Agent", roleLabel: "Sales Agent", isMe: false } : null,
+                    j.fieldManagerId ? { staffId: j.fieldManagerId, name: j.fieldManagerName || "Field Manager", roleLabel: "Field Manager", isMe: false } : null,
+                    j.ninjaId ? { staffId: j.ninjaId, name: j.ninjaName || "Ninja", roleLabel: "Ninja (pickup)", isMe: false } : null,
+                  ].filter((x): x is { staffId: string; name: string; roleLabel: string; isMe: boolean } => !!x)}
+                />
+              </section>
+            </Reveal>
+          )}
           <Reveal delay={0.06}>
             <section className="rounded-2xl border border-border bg-card p-5 shadow-card">
               <h3 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground"><History className="h-3.5 w-3.5" /> Timeline</h3>

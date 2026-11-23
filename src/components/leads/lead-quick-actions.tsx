@@ -30,7 +30,7 @@ import { useState } from "react";
 import Link from "next/link";
 import {
   Phone, MessageSquare, Mail, Pencil, UserCog, Route as RouteIcon,
-  BadgePercent, CalendarClock, FileText, User, Zap, type LucideIcon,
+  BadgePercent, CalendarClock, FileText, User, Zap, MessagesSquare, type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePermissions } from "@/lib/permissions-context";
@@ -139,6 +139,7 @@ export function LeadQuickActions({ lead, readOnly = false }: { lead: Lead; readO
         {phoneDigits && <Tile icon={Phone} label={`Call ${lead.number}`} tone="green" href={`tel:${lead.number}`} />}
         {phoneDigits && <Tile icon={MessageSquare} label="WhatsApp" tone="emerald" href={`https://wa.me/${phoneDigits}`} external />}
         {lead.email && <Tile icon={Mail} label="Email" tone="sky" href={`mailto:${lead.email}`} />}
+        {allow(can, CAP.lead.message) && <Tile icon={MessagesSquare} label="Message Team" tone="sky" onClick={() => document.getElementById("conversation")?.scrollIntoView({ behavior: "smooth", block: "center" })} nudge="y" />}
         {canEdit && <Tile icon={Pencil} label="Edit Lead" tone="blue" href={`/leads/list?lead=${lead.id}&action=edit`} />}
         {canRoute && <Tile icon={RouteIcon} label="Route Lead" tone="violet" onClick={() => setRouteOpen(true)} />}
         {canDeal && <Tile icon={BadgePercent} label={existingDeal ? "View / Revise Deal" : "Push to Deal"} tone="amber" onClick={() => setDealOpen(true)} />}

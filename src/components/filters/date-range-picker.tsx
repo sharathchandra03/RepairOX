@@ -105,19 +105,19 @@ export function DateRangePicker({
           style={{ transformOrigin: "top" }}
           className="overflow-hidden"
         >
-          <div className="flex items-end gap-4 pt-0.5">
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <div className="flex items-center gap-3 pt-0.5">
+            <div className="flex items-center gap-2.5">
+              <label className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Date Range
               </label>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => setModalOpen(true)}
-                  className="group flex h-11 items-center gap-2.5 rounded-xl border border-input bg-card px-3.5 text-sm transition hover:border-[#4361EE] focus:outline-none focus-visible:border-[#4361EE] focus-visible:ring-2 focus-visible:ring-[#4361EE]/15"
+                  className="group flex h-[34px] items-center gap-2 rounded-xl border border-input bg-card px-2.5 text-[12.5px] transition hover:border-[#4361EE] focus:outline-none focus-visible:border-[#4361EE] focus-visible:ring-2 focus-visible:ring-[#4361EE]/15"
                 >
-                  <span className="grid h-6 w-6 place-items-center rounded-md bg-[#4361EE]/10 text-[#4361EE]">
-                    <CalendarDays className="h-3.5 w-3.5" />
+                  <span className="grid h-5 w-5 place-items-center rounded-md bg-[#4361EE]/10 text-[#4361EE]">
+                    <CalendarDays className="h-3 w-3" />
                   </span>
                   {hasRange ? (
                     <span className="font-medium text-foreground">
@@ -126,7 +126,7 @@ export function DateRangePicker({
                   ) : (
                     <span className="text-muted-foreground">Pick a custom range</span>
                   )}
-                  <Pencil className="h-3.5 w-3.5 text-muted-foreground group-hover:text-[#4361EE]" />
+                  <Pencil className="h-3 w-3 text-muted-foreground group-hover:text-[#4361EE]" />
                 </button>
 
                 {hasRange && (
@@ -137,10 +137,10 @@ export function DateRangePicker({
                       onToChange("");
                       setModalOpen(true);
                     }}
-                    className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-input text-muted-foreground transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600"
+                    className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-xl border border-input text-muted-foreground transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600"
                     aria-label="Clear date range"
                   >
-                    <X className="h-4 w-4" />
+                    <X className="h-3.5 w-3.5" />
                   </button>
                 )}
               </div>

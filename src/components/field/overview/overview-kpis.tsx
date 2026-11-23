@@ -13,17 +13,10 @@ import { FieldKpiCards } from "@/components/field/field-kpi-cards";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { DateRangePicker } from "@/components/filters/date-range-picker";
 import { inr } from "@/components/field/dashboard/dashboard-table";
-import { boundsForPreset, inBounds, tripDateOf, tripGroupOf, isCompleted, isAssigned, buildSummaryRows, sumRows, type DashPreset } from "@/lib/field-dashboard";
+import { boundsForPreset, inBounds, tripDateOf, tripGroupOf, isCompleted, isAssigned, buildSummaryRows, sumRows, DASH_PRESETS, type DashPreset } from "@/lib/field-dashboard";
 import type { FieldOverview } from "@/components/field/overview/use-field-overview";
 
-const PERIODS: { label: string; value: DashPreset }[] = [
-  { label: "All", value: "all" },
-  { label: "Today", value: "today" },
-  { label: "Last Week", value: "7days" },
-  { label: "Last Month", value: "lastmonth" },
-  { label: "Year", value: "year" },
-  { label: "Custom", value: "custom" },
-];
+const PERIODS = DASH_PRESETS;
 const DROP_STATUSES = new Set(["ready_for_drop", "drop_scheduled", "out_for_drop"]);
 
 export function OverviewKpis({ o }: { o: FieldOverview }) {

@@ -794,8 +794,8 @@ export function kpiSummaryFromTotals(t: PerfTotals): KpiSummary {
    the caller via the shared multi-store predicate; this covers the rest.
    ═══════════════════════════════════════════════════════════════════════ */
 
-/** The date presets shown on the performance strip (mirrors the reference
- *  image: All / Today / This Month / Last Month / Custom). `thisWeek` is used
+/** The date presets shown on the performance strip (the shared standard strip:
+ *  All / Today / Yesterday / This Month / Last Month / This Year / Custom). `thisWeek` is used
  *  by the operational Lead Dashboard (current calendar week, Mon–Sun). */
 export type PerfDateRange = "all" | "today" | "yesterday" | "thisWeek" | "7days" | "thisMonth" | "lastMonth" | "thisYear" | "custom";
 

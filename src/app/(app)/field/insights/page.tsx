@@ -67,7 +67,7 @@ function Insights() {
   const { jobs, hydrated, ctx, multiStore, canTeam } = useFieldDashboard();
 
   /* ─── selections (one source for every section) ─── */
-  const [preset, setPreset] = useState<DashPreset>("month");
+  const [preset, setPreset] = useState<DashPreset>("thismonth");
   const [from, setFrom] = useState(""); const [to, setTo] = useState("");
   const [storeSel, setStoreSel] = useState<string[]>([]);
   const [by, setBy] = useState<InsightBy>(multiStore ? "store" : canTeam ? "engineer" : "type");

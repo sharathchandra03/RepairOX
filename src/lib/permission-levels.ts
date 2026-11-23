@@ -142,7 +142,7 @@ export const PERMISSION_MODULES: ModuleDef[] = [
       view: ["leads_view", "deals_view", "quotations_view", "companies_view", "contacts_view", "comms_activities_view", "leads_inbox_view", "leads_map_view", "view_sales_reports", "leads_performance_view_own"],
       work: [
         "manage_sales", "leads_create", "leads_edit", "leads_stage_change", "leads_priority_change",
-        "leads_pin", "leads_followup", "leads_convert", "deals_create", "deals_edit", "quotations_create",
+        "leads_pin", "leads_followup", "leads_message", "leads_convert", "deals_create", "deals_edit", "quotations_create",
         "quotations_send", "quotations_convert_to_invoice", "companies_create", "companies_edit",
         "contacts_create", "contacts_manage", "comms_call_log", "comms_email_send",
         "comms_whatsapp_send", "comms_tasks_manage", "comms_meetings_manage", "send_communications",
@@ -183,6 +183,18 @@ export const PERMISSION_MODULES: ModuleDef[] = [
     icon: "UserCheck",
     levels: {
       work: ["leads_sales_agent"],
+    },
+  },
+  {
+    // Lead Reassignment is its OWN single-toggle module so an admin can give or
+    // remove the right to hand work to another agent (change a lead's owner,
+    // give a follow-up to someone else) per role, independent of the Leads tier.
+    id: "lead_reassignment",
+    label: "Lead Reassignment",
+    blurb: "Change a lead's owner and give follow-ups to other agents. Off = the controls show locked.",
+    icon: "Repeat2",
+    levels: {
+      work: ["leads_reassign_access"],
     },
   },
   {
@@ -514,7 +526,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       field: "manage", inventory: "manage", catalog: "manage", customers: "manage", loyalty: "manage",
       employees: "manage", accounts: "manage", reports: "manage", stores: "full",
       employees_admin: "manage", settings: "full", account: "work", deals: "full",
-      work_session: "full", trash: "manage",
+      work_session: "full", trash: "manage", lead_reassignment: "work",
     },
   },
   {
@@ -528,7 +540,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       field: "manage", inventory: "manage", catalog: "work", customers: "manage", loyalty: "manage",
       employees: "view", accounts: "work", reports: "manage", stores: "view",
       employees_admin: "view", settings: "view", account: "work", deals: "manage",
-      work_session: "manage",
+      work_session: "manage", lead_reassignment: "work",
     },
   },
   {

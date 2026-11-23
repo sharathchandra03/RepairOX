@@ -7,14 +7,14 @@
    <Dropdown>) so it floats above the table instead of being clipped.
    ────────────────────────────────────────────────────────────────────────── */
 
-import { Eye, Pin, PinOff, MoreHorizontal, Pencil, Flag, Trash2, Route as RouteIcon, FileText, MessageSquare } from "lucide-react";
+import { Eye, Pin, PinOff, MoreHorizontal, Pencil, Flag, Trash2, Route as RouteIcon, FileText, MessageSquare, MessagesSquare } from "lucide-react";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { Can } from "@/components/common/can";
 import { CAP } from "@/lib/capabilities";
 import { cn } from "@/lib/utils";
 import type { Lead } from "@/lib/leads-data";
 
-export type LeadAction = "view" | "edit" | "pin" | "priority" | "delete" | "route" | "quotation" | "comment";
+export type LeadAction = "view" | "edit" | "pin" | "priority" | "delete" | "route" | "quotation" | "comment" | "message";
 
 /** Action handler. The `anchor` (3rd arg) is only passed for the "comment"
  *  action — it is the chat trigger element, so the list page can anchor the
@@ -150,6 +150,9 @@ export function LeadActionsMenu({
         {(close) => (
           <>
             <MenuItem icon={Eye} onClick={() => { onAction("view", lead); close(); }}>View</MenuItem>
+            <Can permission={CAP.lead.message}>
+              <MenuItem icon={MessagesSquare} onClick={() => { onAction("message", lead); close(); }}>Message team</MenuItem>
+            </Can>
             <Can permission={CAP.quotation.create}>
               <MenuItem icon={FileText} onClick={() => { onAction("quotation", lead); close(); }}>Send Quotation</MenuItem>
             </Can>

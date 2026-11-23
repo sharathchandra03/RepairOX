@@ -691,7 +691,7 @@ function Inner({ onClose, onCreated }: { onClose: () => void; onCreated?: (job: 
           ]} />
           <ReviewGroup title="Location Information" onEdit={() => go(2)} rows={[
             ["Address", [loc.address, loc.pincode].filter(Boolean).join(" – ")], ["Landmark", loc.landmark],
-            ["Map", hasPin ? `Pinned (${loc.lat!.toFixed(5)}, ${loc.lng!.toFixed(5)})` : loc.mapsUrl ? "Link saved (no coordinates)" : ""],
+            ["Map", loc.mapsUrl ? loc.mapsUrl : hasPin ? "Pinned on map" : ""],
             ["Instructions", loc.instructions],
           ]} />
           <ReviewGroup title="Trip Information" onEdit={() => go(3)} rows={[

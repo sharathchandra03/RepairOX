@@ -288,11 +288,18 @@ export const CAP = {
     // follow-up agent) needs `reassignAny`. Mirrors leads_ownership_guard (0050).
     reassign: ["leads_reassign", "leads_assign", "assign", "manage_sales"],
     reassignAny: ["leads_reassign", "assign", "manage_sales"],
+    // Lead Reassignment: change an EXISTING owner / give a follow-up to another
+    // agent. GRANULAR key only (no manage_sales fallback) so an admin can turn it
+    // off per role; managers/owners get it from the migration seed + defaults.
+    reassignAccess: ["leads_reassign_access"],
     stageChange: ["leads_stage_change", "manage_sales"],
     priorityChange: ["leads_priority_change", "manage_sales"],
     pin: ["leads_pin", "leads_edit", "manage_sales"],
     // Work a lead's follow-ups (schedule/complete/cancel). Editing implies it.
     followup: ["leads_followup", "leads_edit", "manage_sales"],
+    // Message the people on a lead (Field Manager / Ninja). The DB boundary is
+    // chain membership (lead_message_send); this only gates the Sales-side UI.
+    message: ["leads_message", "leads_followup", "leads_edit", "manage_sales"],
     convert: ["leads_convert", "manage_sales"],
     import: ["leads_import", "import_data", "manage_sales"],
     export: ["leads_export", "export_reports", "manage_sales"],

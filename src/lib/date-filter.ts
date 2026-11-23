@@ -22,8 +22,10 @@ export type DashboardDatePreset =
   | "today"
   | "yesterday"
   | "7days"
+  | "thismonth"
   | "this_month"
   | "last_month"
+  | "thisyear"
   | "this_year"
   | "all"
   | "custom";
@@ -34,15 +36,32 @@ export type ListDatePreset =
   | "today"
   | "yesterday"
   | "7days"
-  | "1month"
+  | "thismonth"
   | "lastmonth"
-  | "1year"
+  | "thisyear"
   | "custom";
 
 /**
+ * THE canonical date-range strip (Tickets / Invoice / Walk-In / Field / Leads /
+ * Dashboards / Reports-style strips). Every date-range strip in the app shows
+ * exactly these options in this order:
+ *   All · Today · Yesterday · This Month · Last Month · This Year · Custom
+ * Surfaces with their own value vocabulary map these labels onto their own
+ * keys, but the LABELS, ORDER and MEANING stay identical.
+ */
+export const STANDARD_DATE_STRIP: { label: string; value: ListDatePreset }[] = [
+  { label: "All", value: "all" },
+  { label: "Today", value: "today" },
+  { label: "Yesterday", value: "yesterday" },
+  { label: "This Month", value: "thismonth" },
+  { label: "Last Month", value: "lastmonth" },
+  { label: "This Year", value: "thisyear" },
+  { label: "Custom", value: "custom" },
+];
+/**
  * Map a Dashboard preset to the equivalent destination-page preset so the same
  * time window is applied on Tickets / Invoices. The dashboard "This Month" and
- * "This Year" collapse onto the destination's rolling "1 Month" / "1 Year"
+ * "This Year" collapse onto the destination's rolling "This Month" / "This Year"
  * presets — the closest existing definitions on those pages (no new preset is
  * introduced). Custom ranges travel via explicit from/to dates and so are
  * unaffected by this mapping.
@@ -52,9 +71,11 @@ export function mapDashboardRangeToListPreset(preset: DashboardDatePreset): List
     case "today": return "today";
     case "yesterday": return "yesterday";
     case "7days": return "7days";
-    case "this_month": return "1month";
+    case "thismonth":
+    case "this_month": return "thismonth";
     case "last_month": return "lastmonth";
-    case "this_year": return "1year";
+    case "thisyear":
+    case "this_year": return "thisyear";
     case "all": return "all";
     case "custom": return "custom";
     default: return "all";
@@ -105,10 +126,12 @@ export function appendDateFilterParams(
 export function readDateFilterParams(
   searchParams: { get: (key: string) => string | null }
 ): { preset: ListDatePreset; from?: string; to?: string } | null {
-  const raw = searchParams.get("dateRange");
-  if (!raw) return null;
+  const rawParam = searchParams.get("dateRange");
+  if (!rawParam) return null;
+  // Legacy vocabulary from older links.
+  const raw = rawParam === "1month" || rawParam === "this_month" ? "thismonth" : rawParam === "1year" || rawParam === "this_year" ? "thisyear" : rawParam;
   const valid: ListDatePreset[] = [
-    "all", "today", "yesterday", "7days", "1month", "lastmonth", "1year", "custom",
+    "all", "today", "yesterday", "7days", "thismonth", "lastmonth", "thisyear", "custom",
   ];
   const preset = (valid as string[]).includes(raw) ? (raw as ListDatePreset) : "all";
   if (preset === "custom") {
@@ -127,7 +150,7 @@ export function readDateFilterParams(
  * This is the ONE place that decides what each destination (Tickets / Invoice)
  * preset MEANS in terms of concrete date boundaries. Both the Tickets module
  * and the Dashboard "Critical Tasks" card call `isInListDateRange` so a given
- * window (e.g. "1 Month") resolves to the EXACT same set of records on both
+ * window (e.g. "This Month") resolves to the EXACT same set of records on both
  * pages. Do not re-implement this math anywhere else — import this instead.
  *
  * Contract:
@@ -173,11 +196,9 @@ export function isInListDateRange(
       return created >= todayStart - 86_400_000 && created < todayStart;
     case "7days":
       return created >= todayStart - 7 * 86_400_000;
-    case "1month": {
-      // Rolling one month relative to today.
-      const from = new Date(now);
-      from.setMonth(from.getMonth() - 1);
-      return created >= startOfDay(from).getTime();
+    case "thismonth": {
+      // Calendar month to date (1st of this month → now).
+      return created >= startOfDay(new Date(now.getFullYear(), now.getMonth(), 1)).getTime();
     }
     case "lastmonth": {
       // Previous calendar month (e.g. today in Sep → all of August).
@@ -185,10 +206,9 @@ export function isInListDateRange(
       const end = startOfDay(new Date(now.getFullYear(), now.getMonth(), 1)).getTime();
       return created >= start && created < end;
     }
-    case "1year": {
-      const from = new Date(now);
-      from.setFullYear(from.getFullYear() - 1);
-      return created >= startOfDay(from).getTime();
+    case "thisyear": {
+      // Calendar year to date (1 Jan → now).
+      return created >= startOfDay(new Date(now.getFullYear(), 0, 1)).getTime();
     }
     case "custom": {
       if (!customFrom && !customTo) return true;
@@ -244,17 +264,13 @@ export function isInListDateRangeTz(
     case "today": return n === today;
     case "yesterday": return n === today - 1;
     case "7days": return n >= today - 7 && n <= today;
-    case "1month": {
-      const d = new Date(Date.UTC(ty, tm - 1, td));
-      d.setUTCMonth(d.getUTCMonth() - 1);
-      return n >= dayNumFromUtcParts(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) && n <= today;
-    }
+    case "thismonth": return n >= dayNumFromUtcParts(ty, tm - 1, 1) && n <= today;
     case "lastmonth": {
       const start = dayNumFromUtcParts(ty, tm - 2, 1);
       const end = dayNumFromUtcParts(ty, tm - 1, 1);
       return n >= start && n < end;
     }
-    case "1year": return n >= dayNumFromUtcParts(ty - 1, tm - 1, td) && n <= today;
+    case "thisyear": return n >= dayNumFromUtcParts(ty, 0, 1) && n <= today;
     case "custom": {
       if (!customFrom && !customTo) return true;
       const from = customFrom ? keyToDayNum(customFrom.slice(0, 10)) : -Infinity;

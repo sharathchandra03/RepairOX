@@ -6,8 +6,9 @@ import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Search, Filter, Plus, User, LayoutGrid, List, Map, Flag, X, ChevronDown, CalendarClock, Pin,
+  Search, Filter, Plus, User, LayoutGrid, List, Flag, X, ChevronDown, CalendarClock, Pin,
   Phone, Mail, RefreshCw, Trash2, Check, SlidersHorizontal, MessageSquare, Send, UserPlus, UserCheck, AlertTriangle,
+  Smartphone, Wrench, IndianRupee,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -55,7 +56,7 @@ import { DealConversationPopover } from "@/components/deals/deal-conversation-po
 import { useLeadStatusFieldJob } from "@/lib/use-lead-status-field-job";
 import {
   followUpState, followUpTone, hasActiveLeadFilters, fieldValuesOf, openFollowUpRowState, followUpLifecycle, openFollowUp, getLeadDevices, leadDevicesTotalEstimate, leadIsExistingCustomer, statusRequiresFollowUp, followUpNounForStatus, isFollowUpStatus, type LeadFollowUp,
-  isNotContactedStatus, isNotContactedLocked, LEAD_DATE_RANGES, EMPTY_LEAD_FILTERS,
+  isNotContactedStatus, isNotContactedLocked, isNoResponseStatus, isLostStatus, LEAD_DATE_RANGES, EMPTY_LEAD_FILTERS,
   isFreshAssignment, isNotContactedActive, isNotContactedHistory, notContactedFocusOf, contactStatusClass,
   type Lead, type LeadFieldKey, type LeadFilterField, type LeadDateRange, type LeadFilters, type LeadView,
   type NotContactedSub, type NotContactedFocus,
@@ -1453,6 +1454,17 @@ export default function LeadsListPage() {
   }, [orderedColumns, frozen.leftKeys, frozen.rightKeys]);
   const scrollRef = useRef<HTMLDivElement>(null);
   useScrollEdges(scrollRef);
+  /* Lead Table presentation: List (data grid) ↔ Cards. Purely visual and
+     personal (per-user localStorage); the same filtered/paged leads feed both. */
+  const viewModeKey = `repairox-lead-table-view::${currentUser?.id ?? "anon"}`;
+  const [viewMode, setViewMode] = useState<"list" | "cards">("list");
+  useEffect(() => {
+    try { setViewMode(localStorage.getItem(viewModeKey) === "cards" ? "cards" : "list"); } catch { /* ignore */ }
+  }, [viewModeKey]);
+  const changeViewMode = (m: "list" | "cards") => {
+    setViewMode(m);
+    try { localStorage.setItem(viewModeKey, m); } catch { /* ignore */ }
+  };
 
   /* ── Workspace Collapse / Expand (presentation-only, per-user) ─────────────
      MANAGEMENT MODE (expanded) ↔ WORK MODE (collapsed). Declared here beside
@@ -1635,11 +1647,10 @@ export default function LeadsListPage() {
     const t = new Date(l.assignedAt).getTime();
     return !isNaN(t) && nowMs - t > slaMinutes * 60_000;
   }, [slaMinutes, nowMs]);
-  // Count = leads with an OPEN follow-up OR at the "Follow-Up" lifecycle stage,
-  // matching exactly what the numbered "Follow-Ups" view now surfaces (it
-  // absorbed the old standalone "Follow-Up" status segment).
+  // Count = leads with an OPEN (scheduled) follow-up — the same number as the
+  // "Active" count inside the Follow-ups view, so the tab badge and the view agree.
   const followUpsCount = useMemo(
-    () => leads.filter((l) => openFollowUpRowState(openFollowUpsByLead.get(l.id)) !== "none" || isFollowUpStatus(l.status)).length,
+    () => leads.filter((l) => openFollowUpRowState(openFollowUpsByLead.get(l.id)) !== "none").length,
     [leads, openFollowUpsByLead],
   );
   const view = filters.view ?? "all";
@@ -1717,7 +1728,7 @@ export default function LeadsListPage() {
       ncFocus: f.ncFocus ?? "all",
       assignedSub: v === "assigned" ? "all" : f.assignedSub,
       // Assigned Leads offers a shorter range strip; fall back safely.
-      dateRange: (v === "assigned" || v === "notContacted") && ["lastmonth", "1year", "7days", "1month"].includes(f.dateRange) ? "all" : f.dateRange,
+      dateRange: (v === "assigned" || v === "notContacted") && ["lastmonth", "thisyear", "7days", "thismonth"].includes(f.dateRange) ? "all" : f.dateRange,
     }));
     try { window.localStorage.setItem(WORKSPACE_VIEW_KEY, v); } catch { /* storage unavailable */ }
   }, [setFilters, WORKSPACE_VIEW_KEY]);
@@ -1809,12 +1820,29 @@ export default function LeadsListPage() {
      Gated by CAP.lead.followup. */
   const [followUpLead, setFollowUpLead] = useState<Lead | null>(null);
   const canFollowUp = allow(can, CAP.lead.followup);
+  /* ── Contact Status → "No Response" → mandatory CALL BACK ──
+     The customer was not reached, so no downstream details exist yet: the agent
+     must schedule a call back. The status is written ONLY once a date & time is
+     picked (cancel = no change), together with the follow-up record, so a No
+     Response lead can never exist without a call-back timer. */
+  const [noResponseLead, setNoResponseLead] = useState<{ lead: Lead; value: string } | null>(null);
+  const applyContactStatus = useCallback(async (lead: Lead, value: string) => {
+    if (isNoResponseStatus(value) && !isNoResponseStatus(lead.contactStatus || "")) {
+      if (!canFollowUp) { toast.error("You need follow-up permission to mark No Response (a call back is required)."); return; }
+      setNoResponseLead({ lead, value });
+      return;
+    }
+    await updateLead(lead.id, { contactStatus: value });
+  }, [canFollowUp, updateLead]);
 
   /* Apply a status change to ONE lead, then auto-create the Field Job when the
      status is a pickup/on-site routing status. Shared by the inline dropdown
      and the bulk action so both behave identically. */
-  const applyLeadStatus = useCallback(async (lead: Lead, status: string) => {
-    await changeLeadStatus(lead.id, status);
+  const applyLeadStatus = useCallback(async (lead: Lead, status: string, lostReason?: string) => {
+    // A Lost stage is never saved without a reason (callers collect it first).
+    const reason = lostReason?.trim();
+    if (isLostStatus(status) && !isLostStatus(lead.status || "") && !reason) { toast.error("Please enter why this lead is lost."); return; }
+    await changeLeadStatus(lead.id, status, reason ? { note: reason, lostReason: reason } : undefined);
     await autoFieldJobForStatus(lead, status);
     // Discounted Lead → open the discount approval request (don't silently save
     // a Discounted Lead without the required Deal information).
@@ -1848,10 +1876,13 @@ export default function LeadsListPage() {
     await updateLead(lead.id, updates);
   }, [updateLead]);
 
-  const handleBulkStatusChange = useCallback(async (status: string) => {
+  const [bulkLost, setBulkLost] = useState<{ status: string; reason: string } | null>(null);
+  const handleBulkStatusChange = useCallback(async (status: string, lostReason?: string) => {
     const ids = Array.from(selected);
     const chosen = leads.filter((l) => ids.includes(l.id));
-    await Promise.all(chosen.map((l) => applyLeadStatus(l, status)));
+    if (isLostStatus(status) && !lostReason?.trim()) return;
+    await Promise.all(chosen.map((l) => applyLeadStatus(l, status, lostReason)));
+    setBulkLost(null);
     toast.success(`Updated ${chosen.length} lead${chosen.length === 1 ? "" : "s"} to “${status}”.`);
     setSelected(new Set());
     setShowBulkStatus(false);
@@ -1898,6 +1929,7 @@ export default function LeadsListPage() {
       case "delete": setConfirmDelete(lead); break;
       case "route": setRouteLeadTarget(lead); break;
       case "quotation": setQuotationLead(lead); break;
+      case "message": router.push(`/leads/${lead.id}#conversation`); break;
       case "comment": {
         // Open an IN-PLACE chat popover anchored to the icon (NO navigation to
         // View Lead) and mark it seen so the unread count/dots clear instantly.
@@ -1992,20 +2024,31 @@ export default function LeadsListPage() {
      A lead the user may not see is simply not returned by RLS — say so once. */
   const deepLinkAction = searchParams.get("action");
   const [deepLinkChecked, setDeepLinkChecked] = useState<string | null>(null);
+  /* Handle each deep link ONCE and then strip ?lead / ?action from the URL.
+     Without this the effect re-ran whenever `leads` changed (e.g. right after
+     saving an edit) and re-opened the Edit form instead of leaving it saved. */
+  const handledDeepLinkRef = useRef("");
   useEffect(() => {
-    if (!deepLinkLeadId) return;
+    if (!deepLinkLeadId) { handledDeepLinkRef.current = ""; return; }
     const lead = leads.find((l) => l.id === deepLinkLeadId);
     if (lead) {
+      const key = `${deepLinkLeadId}|${deepLinkAction ?? ""}`;
+      if (handledDeepLinkRef.current === key) return;
+      handledDeepLinkRef.current = key;
       if (deepLinkAction === "edit") setEditLead(lead);
       else if (deepLinkAction === "quotation") setQuotationLead(lead);
       else openLead(lead);
+      const rest = new URLSearchParams(searchParams.toString());
+      rest.delete("lead"); rest.delete("action");
+      const qs = rest.toString();
+      router.replace(qs ? `/leads/list?${qs}` : "/leads/list", { scroll: false });
       return;
     }
     if (hydrated && deepLinkChecked !== deepLinkLeadId) {
       setDeepLinkChecked(deepLinkLeadId);
       toast.error("Lead unavailable", { description: "This lead doesn't exist or isn't assigned to you." });
     }
-  }, [deepLinkLeadId, deepLinkAction, leads, hydrated, deepLinkChecked, openLead]);
+  }, [deepLinkLeadId, deepLinkAction, leads, hydrated, deepLinkChecked, openLead, router, searchParams]);
   /* ?action=new[&customerId=][&phone=][&email=][&name=] — "Create Lead" /
      "Create New Lead for This Customer" from the search no-results state, the
      Customer 360 page, or the repeat-enquiry notice. Opens the normal Add Lead
@@ -2042,13 +2085,7 @@ export default function LeadsListPage() {
     if (filters.evidenceIds?.length) {
       chips.push({ label: "Intelligence evidence", value: `${filters.evidenceIds.length} leads`, onClear: () => setFilters((f) => ({ ...f, evidenceIds: [] })) });
     }
-    if (filters.dateRange !== "all") {
-      chips.push({
-        label: "Date",
-        value: DATE_RANGES.find((d) => d.value === filters.dateRange)?.label ?? filters.dateRange,
-        onClear: () => setFilters((f) => ({ ...f, dateRange: "all" })),
-      });
-    }
+    // The date range is NOT shown as a chip: the date strip above already shows it.
     if (filters.followUp !== "any") {
       const fu = FOLLOWUP_FILTERS.find((d) => d.value === filters.followUp);
       chips.push({
@@ -2209,7 +2246,7 @@ export default function LeadsListPage() {
               <ContactStatusCell
                 lead={lead}
                 options={contactStatusOptions}
-                onSave={(v) => updateLead(lead.id, { contactStatus: v })}
+                onSave={(v) => void applyContactStatus(lead, v)}
                 locked={locked || !canEditLead}
               />
               {locked && <span className="mt-1 block text-center text-[10px] font-semibold uppercase tracking-wide text-amber-600">Locked · reassign to unlock</span>}
@@ -2304,6 +2341,14 @@ export default function LeadsListPage() {
                 value={lead.status || ""}
                 options={statusOptions}
                 onChange={(v) => applyLeadStatus(lead, v)}
+                // Lost needs a reason: the pill popover switches to a reason box
+                // (same inline pattern as Not Qualified) before anything is saved.
+                reasonPromptFor={(v) =>
+                  isLostStatus(v) && !isLostStatus(lead.status || "")
+                    ? { label: "Why is this lead lost?", initial: lead.lostReason || "" }
+                    : null
+                }
+                onChangeWithReason={(v, reason) => applyLeadStatus(lead, v, reason)}
                 toneClass={lead.status ? statusTone(lead.status) : "bg-zinc-50 text-zinc-400 ring-zinc-200"}
                 dotColor={stageDot(lead.status || "")}
                 dotFor={stageDot}
@@ -2344,7 +2389,7 @@ export default function LeadsListPage() {
     },
     [
       selected, toggleOne, getStore, canAssign, setDeviceDetailsLead,
-      contactStatusOptions, updateLead, canEditLead, leadNatureOptions,
+      contactStatusOptions, updateLead, applyContactStatus, canEditLead, leadNatureOptions,
       leadCategoryOptions, subCategoryOptions, applyLeadCategory,
       statusOptions, applyLeadStatus, canBulkStatus, canViewTicket, canViewInvoice,
       viewAsReadOnly, dealConvoByLead,
@@ -2425,10 +2470,12 @@ export default function LeadsListPage() {
             {/* Lead follow-up bell — the current user's Due/Overdue follow-ups.
                 "Open Lead" switches to the Follow-Up view and blinks the row. */}
             <LeadFollowUpBell onOpenLead={openFollowUpForLead} />
+            {/* View switch — flips THIS table between List and Cards. */}
             <div className="hidden items-center gap-0.5 rounded-xl border border-border bg-card p-0.5 shadow-sm sm:flex">
-              <Link href="/leads/list" className="grid h-8 w-8 place-items-center rounded-lg bg-[#4361EE] text-white" title="List View"><List className="h-3.5 w-3.5" /></Link>
-              <Link href="/leads/kanban" className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:text-zinc-700 hover:bg-muted transition" title="Kanban View"><LayoutGrid className="h-3.5 w-3.5" /></Link>
-              <Link href="/leads/map-view" className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:text-zinc-700 hover:bg-muted transition" title="Map View"><Map className="h-3.5 w-3.5" /></Link>
+              <button type="button" onClick={() => changeViewMode("list")} aria-pressed={viewMode === "list"} title="List View"
+                className={cn("grid h-8 w-8 place-items-center rounded-lg transition", viewMode === "list" ? "bg-[#4361EE] text-white" : "text-zinc-400 hover:bg-muted hover:text-zinc-700")}><List className="h-3.5 w-3.5" /></button>
+              <button type="button" onClick={() => changeViewMode("cards")} aria-pressed={viewMode === "cards"} title="Card View"
+                className={cn("grid h-8 w-8 place-items-center rounded-lg transition", viewMode === "cards" ? "bg-[#4361EE] text-white" : "text-zinc-400 hover:bg-muted hover:text-zinc-700")}><LayoutGrid className="h-3.5 w-3.5" /></button>
             </div>
             {/* Assign Leads — manual intake + assignment. Separate permission
                 (leads_assign_intake); the ordinary Add Lead stays untouched. */}
@@ -2656,13 +2703,31 @@ export default function LeadsListPage() {
           {statusOptions.map((s) => (
             <button
               key={s}
-              onClick={() => void handleBulkStatusChange(s)}
+              onClick={() => (isLostStatus(s) ? setBulkLost({ status: s, reason: "" }) : void handleBulkStatusChange(s))}
               className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold ring-1 ring-inset transition hover:scale-105", statusTone(s))}
             >
               <span className="h-1.5 w-1.5 rounded-full bg-current" />{s}
             </button>
           ))}
-          <button onClick={() => setShowBulkStatus(false)} className="ml-auto text-xs text-muted-foreground hover:text-foreground">Cancel</button>
+          {bulkLost && (
+            <div className="flex w-full flex-wrap items-center gap-2 border-t border-indigo-200 pt-2">
+              <input
+                autoFocus
+                value={bulkLost.reason}
+                onChange={(e) => setBulkLost({ ...bulkLost, reason: e.target.value })}
+                placeholder={`Why are these leads “${bulkLost.status}”? (required)`}
+                className="h-8 min-w-[240px] flex-1 rounded-lg border border-input bg-card px-2.5 text-[12px] outline-none focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15"
+              />
+              <button
+                disabled={!bulkLost.reason.trim()}
+                onClick={() => void handleBulkStatusChange(bulkLost.status, bulkLost.reason)}
+                className="rounded-lg bg-[#4361EE] px-3 py-1.5 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Mark Lost
+              </button>
+            </div>
+          )}
+          <button onClick={() => { setBulkLost(null); setShowBulkStatus(false); }} className="ml-auto text-xs text-muted-foreground hover:text-foreground">Cancel</button>
         </motion.div>
       )}
 
@@ -2671,7 +2736,21 @@ export default function LeadsListPage() {
           and month calendar), so multiple follow-ups per lead are planned and
           reviewed in one place. */}
       {view === "followUps" ? (
-        <LeadFollowUpView leads={filteredLeads} onOpenLead={openLead} highlightLeadId={highlightLeadId} />
+        <LeadFollowUpView
+          leads={filteredLeads}
+          onOpenLead={openLead}
+          highlightLeadId={highlightLeadId}
+          renderDevice={(lead) => <DeviceIssueCell lead={lead} onOpen={setDeviceDetailsLead} />}
+          renderActions={(lead) => (
+            <LeadActionsMenu
+              lead={lead}
+              onAction={handleAction}
+              readOnly={viewAsReadOnly}
+              hasDealConversation={!!dealConvoByLead[lead.id]?.hasConvo}
+              dealUnreadCount={dealConvoByLead[lead.id]?.unread ?? 0}
+            />
+          )}
+        />
       ) : (
       <>
       {/* Not-Contacted accountability banner — explains the queue + the lock. */}
@@ -2688,7 +2767,7 @@ export default function LeadsListPage() {
             scroll-sync. Sharp 2px frame + brand header preserved. */}
       <div
         ref={scrollRef}
-        className="rox-table-card rox-grid-scroll rox-lock-grow shadow-card hidden md:block overflow-auto"
+        className={cn("rox-table-card rox-grid-scroll rox-lock-grow shadow-card overflow-auto", viewMode === "cards" ? "hidden" : "hidden md:block")}
         /* FIXED height (not max-height) so the table workspace FILLS the
            available viewport even with only a few leads — the frame grows to
            the bottom and the detached footer anchors near the viewport bottom
@@ -2900,8 +2979,172 @@ export default function LeadsListPage() {
         {!hydrated && <div className="p-12 text-center text-sm text-muted-foreground">Loading leads…</div>}
       </div>
 
+      {/* CARD VIEW — a richer, scannable alternative to the table. A temperature
+          accent (Hot / Warm / Cold) runs along the top and tints the avatar
+          ring; the device sits in its own panel; three stat tiles (value,
+          follow-up, priority) and the owner + actions close the card. Every
+          value is read from the same canonical lead / derived workflow as the
+          table, and the same gating (N/A) + permissions apply. */}
+      {viewMode === "cards" && (
+      <div className="rox-lock-grow rox-grid-scroll hidden min-h-0 auto-rows-max content-start gap-4 overflow-auto p-1 pb-3 md:grid [grid-template-columns:repeat(auto-fill,minmax(330px,1fr))]">
+        {paged.map((lead, i) => {
+          const locked = view !== "all" && isNotContactedLocked(lead);
+          const gated = locked || isDownstreamGated(lead);
+          const wf = workflowByLead[lead.id] ?? deriveLeadWorkflow(lead, workflowSources);
+          const lvl = leadNatureLevel(lead.leadNature || lead.priority || "");
+          const accent = lvl === 3 ? "#E11D48" : lvl === 2 ? "#F59E0B" : lvl === 1 ? "#0EA5E9" : "#94A3B8";
+          const open = openFollowUpsByLead.get(lead.id);
+          const fuState = open ? openFollowUpRowState(open) : followUpState(lead.followUpDate);
+          const overdue = fuState === "overdue";
+          const explicitNC = contactStatusClass(lead.contactStatus || "") === "not_contacted";
+          const fresh = isFreshAssignment(lead, leadsWithAnyFollowUp.has(lead.id)) && (view === "assigned" || !explicitNC);
+          const devices = getLeadDevices(lead);
+          const first = devices[0];
+          const total = leadDevicesTotalEstimate(lead);
+          const ao = outlineTone(wf.fieldStatus ? wf.fieldStatusTone : leadActionTone(wf.action));
+          const actionLabel = wf.fieldStatus ? wf.fieldStatusLabel : wf.actionLabel;
+          const phoneDigits = (lead.number || "").replace(/\D/g, "");
+          return (
+            <motion.div
+              key={lead.id}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              whileHover={{ y: -3 }}
+              transition={{ delay: Math.min(0.02 * i, 0.25), duration: 0.22 }}
+              onClick={() => openLead(lead)}
+              className={cn(
+                "group relative flex min-h-[250px] shrink-0 cursor-pointer flex-col overflow-hidden rounded-2xl border bg-card shadow-card transition-shadow hover:shadow-[0_18px_40px_-22px_rgba(20,30,80,0.45)]",
+                selected.has(lead.id) ? "border-[#4361EE] ring-2 ring-[#4361EE]/20" : overdue ? "border-red-300" : "border-zinc-300",
+                explicitNC && "bg-red-50/60",
+                fresh && !explicitNC && "bg-[#ECFAF7]",
+              )}
+            >
+              {/* temperature accent + soft glow */}
+              <span aria-hidden className="absolute inset-x-0 top-0 h-1" style={{ background: `linear-gradient(90deg, ${accent}, ${accent}55)` }} />
+              <span aria-hidden className="pointer-events-none absolute -right-8 -top-10 h-28 w-28 rounded-full opacity-[0.14] blur-2xl" style={{ background: accent }} />
+              <div className="relative flex flex-1 flex-col gap-3 p-4 pt-5">
+                {/* identity */}
+                <div className="flex items-start gap-2.5">
+                  <span onClick={(e) => e.stopPropagation()} className="mt-2.5">
+                    <Checkbox checked={selected.has(lead.id)} onChange={() => toggleOne(lead.id)} aria-label={`Select lead ${lead.leadNo || lead.id}`} />
+                  </span>
+                  <span className="rounded-full p-[2px]" style={{ background: `conic-gradient(${accent}, ${accent}33, ${accent})` }}>
+                    <span className="block rounded-full bg-card p-[2px]"><Avatar name={lead.name || lead.leadNo} size={40} /></span>
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="flex min-w-0 items-center gap-1 text-[14.5px] font-bold text-zinc-900">
+                      {(dealConvoByLead[lead.id]?.unread ?? 0) > 0 && <span aria-label="Unread deal conversation" className="h-2 w-2 shrink-0 rounded-full bg-rose-400 ring-2 ring-rose-100" />}
+                      {lead.pinnedAt && <Pin className="h-3 w-3 shrink-0 fill-[#7C5CFC] text-[#7C5CFC]" />}
+                      <span className="truncate" title={lead.name || undefined}>{lead.name || "—"}</span>
+                      {!locked && <LeadStatusTick wf={wf} lead={lead} />}
+                    </p>
+                    <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                      {leadIsExistingCustomer(lead)
+                        ? <UserCheck className="h-3 w-3 text-emerald-600" strokeWidth={2.4}><title>Existing customer</title></UserCheck>
+                        : <UserPlus className="h-3 w-3 text-amber-500" strokeWidth={2.4}><title>New prospect</title></UserPlus>}
+                      <span className="font-semibold tracking-wide text-zinc-500">{lead.leadNo}</span>
+                      {!locked && lead.source && <><span aria-hidden>·</span><span className="truncate">{lead.source}</span></>}
+                    </p>
+                  </div>
+                  {locked && <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-200">Locked</span>}
+                </div>
+                {locked ? (
+                  <p className="rounded-xl border border-dashed border-amber-300 bg-amber-50/60 px-3 py-2.5 text-[12px] text-amber-800">
+                    Locked after 48h with no contact. A manager must reassign it to unlock the flow.
+                  </p>
+                ) : (
+                <>
+                {/* temperature · action · contact status */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {lead.status && <span className={cn("rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset", statusTone(lead.status))}>{lead.status}</span>}
+                  {!gated && (lead.leadNature || lead.priority) && (
+                    <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset", leadNatureTone(lead.leadNature || lead.priority || ""))}>
+                      <AnimatedTemperatureGlyph glyph={leadNatureGlyph(lead.leadNature || lead.priority || "")} changeKey={lead.leadNature || lead.priority || ""} />
+                      {lead.leadNature || lead.priority}
+                    </span>
+                  )}
+                  {!gated && (
+                    <span title={`${actionLabel} · System-derived — ${wf.reason}`} className={cn("inline-flex max-w-full items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset", ao.pill)}>
+                      <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full bg-current", ao.accent)} aria-hidden />
+                      <span className="truncate">{actionLabel}</span>
+                    </span>
+                  )}
+                  {lead.contactStatus && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-zinc-50 px-2 py-0.5 text-[11px] font-medium text-zinc-600 ring-1 ring-inset ring-zinc-300">
+                      <Phone className="h-2.5 w-2.5" /> {lead.contactStatus}
+                    </span>
+                  )}
+                </div>
+                {/* device panel */}
+                {gated ? (
+                  <div className="rounded-xl border border-dashed border-zinc-300 px-3 py-2.5 text-[12px] text-zinc-400">Device &amp; value unlock once the lead is contacted and qualified.</div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); if (devices.length) setDeviceDetailsLead(lead); }}
+                    className="flex w-full items-center gap-3 rounded-xl border border-zinc-300/80 bg-muted/30 px-3 py-2.5 text-left transition hover:border-[#4361EE]/50"
+                  >
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-[#4361EE]/20 bg-[#EEF1FD] text-[#4361EE]"><Smartphone className="h-4 w-4" /></span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] font-semibold text-zinc-900">{first?.label || lead.device || "No device yet"}{devices.length > 1 && <span className="ml-1.5 rounded-full bg-[#EEF1FD] px-1.5 py-0.5 text-[10px] font-bold text-[#4361EE]">+{devices.length - 1}</span>}</span>
+                      <span className="mt-0.5 flex items-center gap-1 truncate text-[11.5px] text-muted-foreground"><Wrench className="h-3 w-3 shrink-0" /><span className="truncate">{first?.issue || lead.issue || "Issue not noted"}</span></span>
+                    </span>
+                    {devices.length > 0 && <ChevronDown className="h-3.5 w-3.5 shrink-0 -rotate-90 text-zinc-400 transition group-hover:text-[#4361EE]" />}
+                  </button>
+                )}
+                {/* stat tiles */}
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="rounded-xl border border-zinc-300/80 bg-muted/30 px-2.5 py-2">
+                    <p className="text-[9.5px] font-semibold uppercase tracking-wider text-muted-foreground">Value</p>
+                    <p className="mt-0.5 flex items-center truncate text-[13px] font-bold text-zinc-900 tnum">{gated || total == null ? <span className="text-zinc-400">—</span> : <><IndianRupee className="h-3 w-3" strokeWidth={2.6} />{formatINR(total).replace(/^₹\s?/, "")}</>}</p>
+                  </div>
+                  <div className="rounded-xl border border-zinc-300/80 bg-muted/30 px-2.5 py-2">
+                    <p className="text-[9.5px] font-semibold uppercase tracking-wider text-muted-foreground">Follow-up</p>
+                    <div className="mt-0.5"><FollowUpCell lead={lead} open={open} /></div>
+                  </div>
+                  <div className="rounded-xl border border-zinc-300/80 bg-muted/30 px-2.5 py-2">
+                    <p className="text-[9.5px] font-semibold uppercase tracking-wider text-muted-foreground">Priority</p>
+                    <p className={cn("mt-0.5 flex items-center gap-1 truncate text-[12.5px] font-bold", lead.priority ? priorityTone(lead.priority) : "text-zinc-400")}>
+                      {lead.priority ? <><Flag className="h-3 w-3" fill="currentColor" />{lead.priority}</> : "—"}
+                    </p>
+                  </div>
+                </div>
+                </>
+                )}
+                {/* footer: owner · quick contact · actions */}
+                <div className="mt-auto flex items-center gap-1.5 border-t border-zinc-300/80 pt-3" onClick={(e) => e.stopPropagation()}>
+                  <div className="min-w-0 flex-1">
+                    {canAssign ? <AssignMenu lead={lead} compact /> : <AssignBadge lead={lead} size={22} />}
+                  </div>
+                  {!locked && lead.number && (
+                    <a href={`tel:${phoneDigits}`} title={lead.number} aria-label={`Call ${lead.name}`} className="grid h-8 w-8 place-items-center rounded-lg text-zinc-500 transition hover:bg-emerald-50 hover:text-emerald-600"><Phone className="h-3.5 w-3.5" /></a>
+                  )}
+                  {!locked && lead.email && (
+                    <a href={`mailto:${lead.email}`} title={lead.email} aria-label={`Email ${lead.name}`} className="grid h-8 w-8 place-items-center rounded-lg text-zinc-500 transition hover:bg-[#EEF1FD] hover:text-[#4361EE]"><Mail className="h-3.5 w-3.5" /></a>
+                  )}
+                  {!locked && (
+                    <LeadActionsMenu
+                      lead={lead}
+                      onAction={handleAction}
+                      readOnly={viewAsReadOnly}
+                      hasDealConversation={!!dealConvoByLead[lead.id]?.hasConvo}
+                      dealUnreadCount={dealConvoByLead[lead.id]?.unread ?? 0}
+                    />
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          );
+        })}
+        {hydrated && filteredLeads.length === 0 && (
+          <div className="col-span-full rounded-2xl border border-border bg-card p-10 text-center text-sm text-muted-foreground">
+            {leads.length === 0 ? "No leads yet." : "No leads match your filters."}
+          </div>
+        )}
+      </div>
+      )}
       {/* Mobile Cards */}
-      <div className="grid grid-cols-1 gap-3 md:hidden">
+      <div className={cn("grid grid-cols-1 gap-3 md:hidden", viewMode === "cards" && "md:hidden")}>
         {paged.map((lead) => {
           const mLocked = isNotContactedLocked(lead);
           return (
@@ -3030,6 +3273,22 @@ export default function LeadsListPage() {
         );
       })()}
 
+      {/* No Response → call back scheduler (required to save the status). */}
+      {noResponseLead && (
+        <DateTimeDialog
+          title={`Schedule call back · ${noResponseLead.lead.leadNo}`}
+          initialIso={openFollowUpsByLead.get(noResponseLead.lead.id)?.dueAt || undefined}
+          onClose={() => setNoResponseLead(null)}
+          onSave={async (iso) => {
+            const { lead, value } = noResponseLead;
+            setNoResponseLead(null);
+            if (!iso) return;
+            await updateLead(lead.id, { contactStatus: value });
+            const fu = await scheduleFollowUp(lead.id, { dueAt: iso, comments: "Call back — customer did not respond" });
+            if (fu) toast.success("Call back scheduled", { description: `${lead.leadNo} · ${new Date(iso).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}` });
+          }}
+        />
+      )}
       {/* Delete confirm */}
       <ConfirmDialog
         open={!!confirmDelete}

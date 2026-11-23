@@ -36,7 +36,7 @@ export function SummaryDashboard({ scope }: { scope: SummaryScope }) {
   const m = META[scope];
   const router = useRouter();
   const { jobs, hydrated, ctx, multiStore } = useFieldDashboard();
-  const [preset, setPreset] = useState<DashPreset>("month");
+  const [preset, setPreset] = useState<DashPreset>("thismonth");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [page, setPage] = useState(1);
