@@ -16,9 +16,11 @@
    ────────────────────────────────────────────────────────────────────────── */
 
 import { useMemo, useState } from "react";
-import { Search, Check, UserPlus, ChevronDown, UserX, AlertTriangle } from "lucide-react";
+import { Search, Check, UserPlus, ChevronDown, UserX, AlertTriangle, Lock } from "lucide-react";
+import { REASSIGN_LOCK_HINT } from "@/lib/lead-reassign";
 import { Avatar } from "@/components/ui/avatar";
 import { Dropdown } from "@/components/ui/dropdown";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { usePermissions } from "@/lib/permissions-context";
 import { useLeads } from "@/lib/leads-context";
 import { canAssignLeads, type Lead } from "@/lib/leads-data";
@@ -60,9 +62,11 @@ export function AssignBadge({ lead, size = 22 }: { lead: Lead; size?: number }) 
  * `compact` renders a denser trigger for table rows.
  */
 export function AssignMenu({ lead, compact }: { lead: Lead; compact?: boolean }) {
-  const { assignLead, salesAgentsFor, salesAgentsReady, canChangeLeadOwner } = useLeads();
+  const { assignLead, salesAgentsFor, salesAgentsReady, canChangeLeadOwner, canReassignAgents } = useLeads();
   const [query, setQuery] = useState("");
   const ineligible = useOwnerIneligible(lead);
+  // Changing an EXISTING owner asks for confirmation first (a first assignment does not).
+  const [pending, setPending] = useState<{ id: string; name: string } | null>(null);
 
   // Mirrors the DB guard: reassign-level keys → any visible lead; leads_assign
   // → leads you own/created (or any lead with a see-all key).
@@ -72,19 +76,47 @@ export function AssignMenu({ lead, compact }: { lead: Lead; compact?: boolean })
   const q = query.trim().toLowerCase();
   const filtered = q ? agents.filter((a) => a.name.toLowerCase().includes(q)) : agents;
 
+  // No Lead Reassignment access on a lead that already has an owner: keep the
+  // control VISIBLE but locked, so it is clear why it cannot be changed.
+  if (!canChange && !!lead.assignedTo && !canReassignAgents) {
+    return (
+      <div className="w-full" onClick={(e) => e.stopPropagation()}>
+        <span
+          title={REASSIGN_LOCK_HINT}
+          aria-label={`Owner ${lead.assignedToName}. ${REASSIGN_LOCK_HINT}`}
+          className={cn(
+            "inline-flex w-full max-w-full cursor-not-allowed items-center gap-1.5 rounded-lg border border-dashed border-zinc-300 bg-muted/40 text-[12.5px] font-medium text-zinc-600",
+            compact ? "px-2 py-1" : "px-2.5 py-1.5",
+          )}
+        >
+          <Avatar name={lead.assignedToName || "?"} size={compact ? 18 : 20} />
+          <span className="min-w-0 flex-1 truncate text-left">{lead.assignedToName}</span>
+          <Lock className="h-3 w-3 shrink-0 text-zinc-400" />
+        </span>
+      </div>
+    );
+  }
   // Without the capability, show the owner read-only (never a dead dropdown).
   if (!canChange) return <AssignBadge lead={lead} size={compact ? 20 : 24} />;
 
   const pick = (id: string, name: string, close: () => void) => {
-    if (id !== lead.assignedTo) void assignLead(lead.id, id, name);
+    if (id !== lead.assignedTo) {
+      if (lead.assignedTo) setPending({ id, name });   // reassignment → confirm first
+      else void assignLead(lead.id, id, name);          // first assignment → straight through
+    }
     close();
     setQuery("");
   };
   const clear = (close: () => void) => {
-    if (lead.assignedTo) void assignLead(lead.id, "", "");
+    if (lead.assignedTo) setPending({ id: "", name: "" });
     close();
     setQuery("");
   };
+  const confirmPending = () => {
+    if (pending) void assignLead(lead.id, pending.id, pending.name);
+    setPending(null);
+  };
+  const leadLabel = `${lead.leadNo || "This lead"}${lead.name ? ` · ${lead.name}` : ""}`;
 
   return (
     <div className="w-full" onClick={(e) => e.stopPropagation()}>
@@ -180,6 +212,19 @@ export function AssignMenu({ lead, compact }: { lead: Lead; compact?: boolean })
           </>
         )}
       </Dropdown>
+      <ConfirmDialog
+        open={!!pending}
+        onClose={() => setPending(null)}
+        onConfirm={confirmPending}
+        danger={false}
+        title={pending && !pending.id ? "Unassign this lead?" : "Reassign this lead?"}
+        description={pending
+          ? pending.id
+            ? `${leadLabel}: reassign from ${lead.assignedToName || "the current agent"} to ${pending.name}? ${pending.name} becomes the owner, ${lead.assignedToName || "the previous agent"} loses it from their list, and the change is recorded in the lead's history.`
+            : `${leadLabel}: remove ${lead.assignedToName || "the current agent"} as the owner? The lead will have no owner until someone is assigned.`
+          : ""}
+        confirmLabel={pending && !pending.id ? "Unassign" : "Yes, reassign"}
+      />
     </div>
   );
 }

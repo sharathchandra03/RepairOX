@@ -97,6 +97,7 @@ export function friendlyLeadOwnershipError(message?: string | null): string | nu
   if (/lead_owner_not_eligible/.test(m)) return "The lead owner must be an active Sales Agent who can work this store.";
   if (/lead_followup_agent_not_eligible/.test(m)) return "The follow-up agent must be an active Sales Agent who can work this store.";
   if (/lead_assign_forbidden/.test(m)) return "You can only create leads owned by yourself. Ask a manager to assign it to another agent.";
+  if (/lead_reassign_access_forbidden/.test(m)) return "You don't have access to reassign leads or hand follow-ups to other agents. Ask a manager or the owner.";
   if (/lead_reassign_forbidden/.test(m)) return "You don't have permission to change the owner of this lead.";
   if (/lead_delete_forbidden/.test(m)) return "You don't have permission to delete leads.";
   if (/lead_followup_closed/.test(m)) return "A completed or cancelled follow-up can't be reassigned.";

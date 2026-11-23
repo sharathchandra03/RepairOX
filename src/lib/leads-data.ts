@@ -638,7 +638,7 @@ export function emptyLeadDraft(agent = ""): LeadDraft {
  *  reassign leads? Resolved through the central CAP entries — the SAME keys the
  *  DB ownership guard (migration 0049) checks — never an ad-hoc key list. */
 export function canAssignLeads(can: (key: PermissionKey) => boolean): boolean {
-  return allow(can, CAP.lead.assign) || allow(can, CAP.lead.reassign);
+  return allow(can, CAP.lead.assign) || allow(can, CAP.lead.reassign) || allow(can, CAP.lead.reassignAccess);
 }
 
 /* ─── Shared filter model (used by BOTH the list and the dashboard) ─────── */

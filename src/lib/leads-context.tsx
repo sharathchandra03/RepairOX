@@ -921,7 +921,8 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     // Changing an EXISTING owner is a reassignment: it needs the Lead Reassignment
     // key on top of the owner-change rules below (first assignment does not).
     if (!mayChangeOwner(canReassignAgents, lead.assignedTo)) return false;
-    if (allow(can, CAP.lead.reassignAny)) return true;
+    // Holding the Lead Reassignment key is enough on its own (mirrors leads_ownership_guard, 0123).
+    if (canReassignAgents || allow(can, CAP.lead.reassignAny)) return true;
     const me = currentUserId || "";
     const mine = !!me && (lead.assignedTo === me || lead.createdBy === me);
     return allow(can, ["leads_assign"]) && (mine || canSeeAllLeads);

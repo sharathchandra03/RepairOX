@@ -18,7 +18,8 @@
    ────────────────────────────────────────────────────────────────────────── */
 
 import { useMemo, useState } from "react";
-import { CalendarClock, Check, X, Plus, UserCheck, History } from "lucide-react";
+import { CalendarClock, Check, X, Plus, UserCheck, History, Lock } from "lucide-react";
+import { REASSIGN_LOCK_HINT } from "@/lib/lead-reassign";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -48,7 +49,7 @@ function toIso(date: string, time: string): string {
 
 export function LeadFollowUpHistory({ lead, readOnly = false }: { lead: Lead; readOnly?: boolean }) {
   const { can } = usePermissions();
-  const { followUpsFor, scheduleFollowUp, completeFollowUp, cancelFollowUp, assignmentHistoryFor, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, optionsFor } = useLeads();
+  const { followUpsFor, scheduleFollowUp, completeFollowUp, cancelFollowUp, assignmentHistoryFor, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, optionsFor, canReassignAgents } = useLeads();
   const canFollowUp = allow(can, CAP.lead.followup) && !readOnly;
 
   const followUps = followUpsFor(lead.id);
@@ -151,8 +152,9 @@ export function LeadFollowUpHistory({ lead, readOnly = false }: { lead: Lead; re
             <div className="mt-1"><DateTimePill date={date} time={time} title="Follow-up" className="h-[34px] rounded-lg" onChange={(d, t) => { setDate(d); setTime(t); }} /></div>
           </div>
           <div className="mt-2">
-            <p className="mb-1 text-[11px] font-medium text-muted-foreground">
+            <p className="mb-1 flex flex-wrap items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
               Follow-up Agent <span className="font-normal normal-case">(Sales Agent — defaults to the lead&apos;s follow-up agent / owner)</span>
+              {!canReassignAgents && <span title={REASSIGN_LOCK_HINT} className="inline-flex items-center gap-1 rounded-md bg-zinc-100 px-1.5 py-0.5 text-[9.5px] font-semibold text-zinc-500 ring-1 ring-inset ring-zinc-200"><Lock className="h-2.5 w-2.5" /> No access to hand over</span>}
             </p>
             {(() => {
               const placeholder = defaultAgentName ? `Default — ${defaultAgentName}`
@@ -160,9 +162,9 @@ export function LeadFollowUpHistory({ lead, readOnly = false }: { lead: Lead; re
                 : currentUserIsSalesAgent(lead.branchId || null) ? "Default — me" : "Select a Sales Agent";
               return (
                 <Select
-                  value={agentId}
+                  value={canReassignAgents ? agentId : ""}
                   onChange={(e) => setAgentId(e.target.value)}
-                  disabled={agents.length === 0}
+                  disabled={agents.length === 0 || !canReassignAgents}
                   className="h-[34px]"
                   placeholder={placeholder}
                   options={[{ label: placeholder, value: "" }, ...agents.map((a) => ({ label: a.name, value: a.id }))]}

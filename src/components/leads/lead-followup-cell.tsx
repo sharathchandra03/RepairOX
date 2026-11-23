@@ -31,10 +31,11 @@
    ────────────────────────────────────────────────────────────────────────── */
 
 import { useEffect, useRef, useState } from "react";
+import { REASSIGN_LOCK_HINT } from "@/lib/lead-reassign";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  CalendarPlus, CalendarClock, PhoneCall, CheckCheck, History, ChevronDown, X,
+  CalendarPlus, CalendarClock, PhoneCall, CheckCheck, History, ChevronDown, X, Lock,
 } from "lucide-react";
 import { DateTimePill } from "@/components/ui/date-time-pill";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -115,7 +116,7 @@ export function LeadFollowUpCell({
   const canFollowUp = allow(can, CAP.lead.followup);
   const {
     followUpsFor, scheduleFollowUp, completeFollowUp, cancelFollowUp, updateLead,
-    salesAgentsFor, isEligibleSalesAgent, optionsFor,
+    salesAgentsFor, isEligibleSalesAgent, optionsFor, canReassignAgents,
   } = useLeads();
 
   // Outcome options for "Complete Follow-Up" are DERIVED from the lead's
@@ -330,6 +331,7 @@ export function LeadFollowUpCell({
                   <ScheduleView
                     agents={agents}
                     defaultAgentName={defaultAgentName}
+                    locked={!canReassignAgents}
                     initialDate={mode === "reschedule" && openFu ? openFu.dueAt.slice(0, 10) : ""}
                     initialTime={mode === "reschedule" && openFu ? new Date(openFu.dueAt).toTimeString().slice(0, 5) : "10:00"}
                     saveLabel={mode === "reschedule" ? "Reschedule" : (seqCount > 0 ? `Schedule #${seqCount + 1}` : "Schedule Follow-Up")}
@@ -413,10 +415,12 @@ function MenuView({
 }
 
 function ScheduleView({
-  agents, defaultAgentName, initialDate, initialTime, saveLabel, busy, onSave,
+  agents, defaultAgentName, locked = false, initialDate, initialTime, saveLabel, busy, onSave,
 }: {
   agents: { id: string; name: string }[];
   defaultAgentName: string;
+  /** No Lead Reassignment access: the agent control stays visible but locked. */
+  locked?: boolean;
   initialDate?: string; initialTime?: string; saveLabel: string; busy: boolean;
   onSave: (date: string, time: string, agentId: string, comment: string) => void;
 }) {
@@ -431,11 +435,14 @@ function ScheduleView({
         <DateTimePill date={date} time={time} title="Follow-up" className="h-9 rounded-lg" onChange={(d, t) => { setDate(d); setTime(t); }} />
       </div>
       <div className="space-y-1">
-        <label className="text-[10.5px] font-medium text-muted-foreground">Follow-Up Agent</label>
+        <label className="flex items-center gap-1.5 text-[10.5px] font-medium text-muted-foreground">
+          Follow-Up Agent
+          {locked && <span title={REASSIGN_LOCK_HINT} className="inline-flex items-center gap-1 rounded-md bg-zinc-100 px-1.5 py-0.5 text-[9.5px] font-semibold text-zinc-500 ring-1 ring-inset ring-zinc-200"><Lock className="h-2.5 w-2.5" /> No access to hand over</span>}
+        </label>
         <Select
-          value={agentId}
+          value={locked ? "" : agentId}
           onChange={(e) => setAgentId(e.target.value)}
-          disabled={agents.length === 0}
+          disabled={agents.length === 0 || locked}
           className="h-9"
           placeholder={defaultAgentName ? `Default — ${defaultAgentName}` : agents.length === 0 ? "No sales agents available" : "Select a Sales Agent"}
           options={[

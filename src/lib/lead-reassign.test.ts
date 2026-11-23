@@ -22,3 +22,12 @@ test("without access a follow-up can stay with people already on the lead, never
 test("with access any agent is allowed", () => {
   assert.equal(mayGiveFollowUpTo({ hasAccess: true, meId: "me", agentId: "stranger" }), true);
 });
+
+import { PERMISSION_MODULES, levelToKeys, keysToLevel } from "./permission-levels";
+test("the Roles & Permissions toggle maps to exactly the access key, both ways", () => {
+  const mod = PERMISSION_MODULES.find((m) => m.id === "lead_reassignment")!;
+  assert.ok(mod, "module exists");
+  assert.deepEqual(levelToKeys(mod, "work"), ["leads_reassign_access"]);
+  assert.equal(keysToLevel(mod, new Set(["leads_reassign_access"] as any)), "work");
+  assert.equal(keysToLevel(mod, new Set([] as any)), "none");
+});

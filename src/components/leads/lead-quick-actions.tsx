@@ -104,7 +104,7 @@ export function LeadQuickActions({ lead, readOnly = false }: { lead: Lead; readO
   const canDeal = allow(can, CAP.deal.create) && !readOnly;
   const canQuote = allow(can, CAP.quotation.view) && !readOnly;
   const canViewCustomer = allow(can, CAP.customer.master);
-  const canAssign = (allow(can, CAP.lead.assign) || allow(can, CAP.lead.reassign)) && !readOnly;
+  const canAssign = (allow(can, CAP.lead.assign) || allow(can, CAP.lead.reassign) || allow(can, CAP.lead.reassignAccess)) && !readOnly;
 
   const phoneDigits = (lead.number || "").replace(/\D/g, "");
   const existingDeal = currentDealForLead(deals, lead.id) ?? null;

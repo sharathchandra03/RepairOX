@@ -235,6 +235,7 @@ export function LeadDetailDrawer({
   const { can } = usePermissions();
   const canEdit = allow(can, CAP.lead.edit) && !readOnly;
   const canFollowUp = allow(can, CAP.lead.followup) && !readOnly;
+  const { canReassignAgents } = useLeads();
 
   if (!lead) return null;
 
@@ -456,6 +457,7 @@ export function LeadDetailDrawer({
                   storeId={lead.branchId || undefined}
                   fallbackName={lead.followUpAgent}
                   disabled={!canFollowUp}
+                  locked={!canReassignAgents}
                   placeholder="Sales Agent (may differ from owner)"
                   onChange={(uid, nm) => { set("followUpAgentId", uid); set("followUpAgent", nm); }}
                 />

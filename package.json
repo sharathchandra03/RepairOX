@@ -23,6 +23,8 @@
     "leads:verify": "node scripts/sales-agent-verify.mjs",
     "leads:search:verify": "node scripts/lead-search-verify.mjs",
     "leads:messages:verify": "node scripts/lead-messages-verify.mjs",
+    "leads:reassign:test": "tsx --test src/lib/lead-reassign.test.ts",
+    "leads:reassign:verify": "node scripts/lead-reassign-verify.mjs",
     "leads:intelligence:test": "tsx --test src/lib/lead-intelligence.test.ts src/lib/lead-sales-mix.test.ts src/lib/lead-journey-report.test.ts",
     "leads:workspace:test": "tsx --test src/lib/lead-workspace.test.ts",
     "leads:salesbook:test": "tsx --test src/lib/lead-sales-book.test.ts",
