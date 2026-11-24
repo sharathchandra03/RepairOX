@@ -589,15 +589,36 @@ export default function PriceControlPage() {
                       </div>
                     </div>
                   )}
-                  {canViewCost && base !== undefined && sp > 0 && (
-                    <div className="flex items-center justify-between rounded-xl border border-border bg-muted/20 px-4 py-2.5 sm:col-span-2">
-                      <span className="text-[12.5px] text-muted-foreground">Gross profit · Margin (on latest cost)</span>
-                      <span className="flex items-center gap-2 text-[13.5px] font-bold tabular-nums">
-                        <span className={cn(sp - base < 0 && "text-rose-600")}>{formatINR(sp - base)}</span>
-                        <span className={cn("rounded-full px-2.5 py-0.5 text-[11px] ring-1 ring-inset", marginTone(((sp - base) / sp) * 100))}>{pct(((sp - base) / sp) * 100)}</span>
-                      </span>
-                    </div>
-                  )}
+                  {canViewCost && item && (() => {
+                    const ready = base !== undefined && sp > 0;
+                    const gp = ready ? sp - base! : 0;
+                    const m = ready ? (gp / sp) * 100 : 0;
+                    return (
+                      <div className="rounded-2xl border border-border bg-card p-4 shadow-sm sm:col-span-2">
+                        <p className="text-[13.5px] font-bold">Calculation preview</p>
+                        <div className="mt-2.5 grid grid-cols-3 gap-3">
+                          <div>
+                            <p className="text-[12px] text-muted-foreground">Set cost price</p>
+                            <p className="mt-0.5 text-[17px] font-extrabold tabular-nums">{base !== undefined ? formatINR(base) : "—"}</p>
+                          </div>
+                          <div>
+                            <p className="text-[12px] text-muted-foreground">Selling price</p>
+                            <p className="mt-0.5 text-[17px] font-extrabold tabular-nums">{sp > 0 ? formatINR(sp) : "—"}</p>
+                          </div>
+                          <div>
+                            <p className="text-[12px] text-muted-foreground">Gross profit</p>
+                            <p className={cn("mt-0.5 text-[17px] font-extrabold tabular-nums", ready && gp < 0 && "text-rose-600")}>{ready ? formatINR(gp) : "—"}</p>
+                          </div>
+                        </div>
+                        <div className="mt-3 flex items-center justify-between border-t border-border pt-2.5">
+                          <span className="text-[12px] text-muted-foreground">Margin percentage</span>
+                          {ready
+                            ? <span className={cn("rounded-full px-2.5 py-0.5 text-[11.5px] font-bold tabular-nums ring-1 ring-inset", marginTone(m))}>{pct(m)}</span>
+                            : <span className="text-[12px] text-muted-foreground">Enter cost and selling price</span>}
+                        </div>
+                      </div>
+                    );
+                  })()}
                   {!item && <p className="text-[12px] text-muted-foreground sm:col-span-2">Link this part to inventory to manage cost and stock.</p>}
                   {item && <p className="text-[12px] text-muted-foreground sm:col-span-2">A stock change is saved as a stock adjustment in Stock Movement. Receiving a purchase (GRN) updates the cost price to that buying price.</p>}
                 </>
