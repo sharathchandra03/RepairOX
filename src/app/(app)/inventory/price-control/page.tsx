@@ -30,36 +30,30 @@ import { useCatalog, brandsForCategory, modelsForBrand, partsForModel, sortCateg
 import { useStore } from "@/lib/store";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { availableStock, buildSkuIndex, effectiveSellingPrice, findLinkedItem } from "@/lib/inventory-analytics";
-import { resolvePartUnitCost, type StockLayerLike } from "@/lib/inventory-costing";
+import { averagePurchaseCost, latestUnitCost, AVG_COST_WINDOW_DAYS, type StockLayerLike } from "@/lib/inventory-costing";
 import { priceChangeInfo, PRICE_CHANGE_WINDOW_DAYS, type DevicePart } from "@/lib/price-list-data";
 import type { InventoryItem } from "@/lib/inventory-data";
 import { cn, formatINR } from "@/lib/utils";
 import { usePermissions } from "@/lib/permissions-context";
+import { useInventoryActions } from "@/lib/use-inventory-actions";
 import { CAP, allow } from "@/lib/capabilities";
 
 /** Margin (on selling price) below which a row is flagged for review. */
 const LOW_MARGIN_PCT = 20;
 
 type Tab = "price" | "link" | "ledger" | "audit";
-type Row = { part: DevicePart; item?: InventoryItem; sp: number; latest?: number; avg?: number };
+type Row = { part: DevicePart; item?: InventoryItem; sp: number; latest?: number; avg?: number; avgFromPurchases?: boolean };
 
 const pct = (n: number) => `${n.toFixed(1)}%`;
 const signed = (n: number, d = 1) => `${n > 0 ? "+" : ""}${n.toFixed(d)}%`;
 
-function latestCostOf(layers: readonly StockLayerLike[], item: InventoryItem): number | undefined {
-  let best: StockLayerLike | undefined;
-  for (const l of layers) {
-    if (l.item_id !== item.id) continue;
-    if (!best || (l.received_at ?? "") >= (best.received_at ?? "")) best = l;
-  }
-  if (best) return best.unit_cost;
-  return item.costState === "configured" ? item.costPrice : undefined;
-}
-
-function costOf(layers: readonly StockLayerLike[], item?: InventoryItem): { latest?: number; avg?: number } {
+/** Latest cost = Cost price (a GRN updates it). Avg = simple average of buying
+ *  prices received in the last AVG_COST_WINDOW_DAYS days (falls back to latest). */
+function costOf(layers: readonly StockLayerLike[], item?: InventoryItem): { latest?: number; avg?: number; avgFromPurchases?: boolean } {
   if (!item) return {};
-  const r = resolvePartUnitCost(item.id, layers, item);
-  return { latest: latestCostOf(layers, item), avg: r.kind === "resolved" ? r.unitCost : undefined };
+  const latest = latestUnitCost(item.id, layers, item);
+  const avg = averagePurchaseCost(item.id, layers);
+  return { latest, avg: avg ?? latest, avgFromPurchases: avg !== undefined };
 }
 
 /** Margin colour scale (shown as a legend under the table). */
@@ -84,6 +78,8 @@ export default function PriceControlPage() {
   const { canViewCost, canEdit, canCreate } = useInventoryScope();
   const { can } = usePermissions();
   const canEditCost = allow(can, CAP.sensitive.editCost);
+  const canAdjust = allow(can, CAP.inventory.adjust);
+  const { adjust } = useInventoryActions();
   const [costFor, setCostFor] = useState<Row | null>(null);
   const [costValue, setCostValue] = useState("");
 
@@ -102,16 +98,17 @@ export default function PriceControlPage() {
   const [picked, setPicked] = useState<InventoryItem | null>(null);
   const [createFor, setCreateFor] = useState<Row | null>(null);
   // Add / edit Price List part dialog (target = existing row, or "new").
-  const [partForm, setPartForm] = useState<{ row: Row | null; name: string; sku: string; price: string; warranty: string } | null>(null);
+  const [partForm, setPartForm] = useState<{ row: Row | null; name: string; sku: string; price: string; warranty: string; cost: string; stock: string } | null>(null);
   const [unlinkTarget, setUnlinkTarget] = useState<Row | null>(null);
+  const [savingForm, setSavingForm] = useState(false);
   const [createAfterAdd, setCreateAfterAdd] = useState(false);
 
   const cats = useMemo(() => sortCategories(categories.filter((c) => c.enabled !== false)), [categories]);
-  const effCat = cats.some((c) => c.id === catId) ? catId : cats[0]?.id ?? "";
+  const effCat = cats.some((c) => c.id === catId) ? catId : "";
   const brandList = useMemo(() => brandsForCategory(brands, effCat), [brands, effCat]);
-  const effBrand = brandList.some((b) => b.id === brandId) ? brandId : brandList[0]?.id ?? "";
+  const effBrand = brandList.some((b) => b.id === brandId) ? brandId : "";
   const modelList = useMemo(() => modelsForBrand(models, effBrand), [models, effBrand]);
-  const effModel = modelList.some((m) => m.id === modelId) ? modelId : modelList[0]?.id ?? "";
+  const effModel = modelList.some((m) => m.id === modelId) ? modelId : "";
   const model = modelList.find((m) => m.id === effModel);
   const brand = brandList.find((b) => b.id === effBrand);
 
@@ -138,9 +135,9 @@ export default function PriceControlPage() {
   };
   const dirty = rows.filter((r) => draft[r.part.id] !== undefined && draft[r.part.id] !== "" && Number(draft[r.part.id]) > 0 && Number(draft[r.part.id]) !== r.sp);
   const linked = rows.filter((r) => r.item).length;
-  const lowMargin = rows.filter((r) => r.avg !== undefined && draftSp(r) > 0 && ((draftSp(r) - r.avg) / draftSp(r)) * 100 < LOW_MARGIN_PCT).length;
+  const lowMargin = rows.filter((r) => r.latest !== undefined && draftSp(r) > 0 && ((draftSp(r) - r.latest) / draftSp(r)) * 100 < LOW_MARGIN_PCT).length;
   const activeChanges = rows.filter((r) => priceChangeInfo(r.part)).length;
-  const belowCost = dirty.filter((r) => r.avg !== undefined && Number(draft[r.part.id]) < r.avg);
+  const belowCost = dirty.filter((r) => r.latest !== undefined && Number(draft[r.part.id]) < r.latest);
 
   // Drop unsaved edits when the model changes.
   useEffect(() => { setDraft({}); setPartQ(""); }, [effModel]);
@@ -166,15 +163,42 @@ export default function PriceControlPage() {
     }
   }
 
-  function savePartForm() {
-    if (!partForm) return;
+  async function savePartForm() {
+    if (!partForm || savingForm) return;
     const name = partForm.name.trim();
     const price = Number(partForm.price);
     if (!name) { toast.error("Enter the part name."); return; }
     if (partForm.row) {
-      // Details only; a price change goes through the table so inventory stays the source of truth.
-      updatePart(partForm.row.part.id, { partName: name, partNumber: partForm.sku.trim(), warranty: partForm.warranty });
-      toast.success(`${name} updated`);
+      const r = partForm.row;
+      const item = r.item;
+      setSavingForm(true);
+      try {
+        // Price: linked parts save on the inventory item (the single source of
+        // truth); the DB link copies it to the Price List and records the change.
+        const priceChanged = price > 0 && price !== r.sp;
+        if (priceChanged && item) await updateInventoryItem(item.id, { sellingPrice: price, regularSellingPrice: price, defaultPrice: price });
+        updatePart(r.part.id, {
+          partName: name, partNumber: partForm.sku.trim(), warranty: partForm.warranty,
+          ...(priceChanged ? { price, priceKnown: true } : {}),
+        });
+        if (item && canEditCost && partForm.cost.trim() !== "") {
+          const c = Number(partForm.cost);
+          if (Number.isFinite(c) && c >= 0 && !(item.costState === "configured" && item.costPrice === c)) {
+            await updateInventoryItem(item.id, {}, { cost: { costPrice: c, standardLabourCost: 0, configured: true } });
+          }
+        }
+        // Stock goes through the audited stock-adjustment path (movement row), never a raw overwrite.
+        if (item && canAdjust && partForm.stock.trim() !== "") {
+          const delta = Math.round(Number(partForm.stock)) - (item.currentStock ?? 0);
+          if (Number.isFinite(delta) && delta !== 0) {
+            await adjust({ itemId: item.id, delta, label: "Price List Edit adjustment", type: "Adjustment", doc: `ADJ-${Date.now()}` });
+          }
+        }
+        setDraft((d) => { const n = { ...d }; delete n[r.part.id]; return n; });
+        toast.success(`${name} updated`);
+      } finally {
+        setSavingForm(false);
+      }
     } else {
       if (!effModel) return;
       const part = addPart({ partName: name, partNumber: partForm.sku.trim(), price: price > 0 ? price : 0, priceKnown: price > 0, warranty: partForm.warranty, modelId: effModel });
@@ -225,13 +249,17 @@ export default function PriceControlPage() {
     },
     ...(canViewCost
       ? ([
-          { key: "latest", pct: 9, header: "Latest cost", align: "center", render: (r) => r.latest !== undefined ? <span className="tabular-nums">{formatINR(r.latest)}</span> : <span className="text-muted-foreground">—</span> },
           {
-            key: "avg", pct: 9, header: "Avg. cost", align: "center", render: (r) => r.avg !== undefined
-              ? <span className="font-bold tabular-nums">{formatINR(r.avg)}</span>
+            key: "latest", pct: 9, header: "Latest cost", align: "center", render: (r) => r.latest !== undefined
+              ? <span className="font-bold tabular-nums" title="Cost price. Updated by edits and by every received purchase (GRN).">{formatINR(r.latest)}</span>
               : r.item && canEditCost
                 ? <button onClick={() => { setCostFor(r); setCostValue(""); }} className="rounded-full border border-dashed border-[#4361EE]/50 px-2.5 py-1 text-[11.5px] font-semibold text-[#4361EE] hover:bg-[#EEF1FD]">Set cost</button>
                 : <span className="text-[12px] text-muted-foreground" title={r.item ? "No purchase or cost price recorded for this item" : "Link this part to inventory first"}>{r.item ? "Not set" : "—"}</span>,
+          },
+          {
+            key: "avg", pct: 9, header: "Avg. cost", align: "center", render: (r) => r.avg === undefined
+              ? <span className="text-muted-foreground">—</span>
+              : <span className="tabular-nums" title={r.avgFromPurchases ? `Average buying price of purchases in the last ${AVG_COST_WINDOW_DAYS} days` : `No purchase in the last ${AVG_COST_WINDOW_DAYS} days, showing the latest cost`}>{formatINR(r.avg)}{!r.avgFromPurchases && <span className="ml-0.5 text-muted-foreground">*</span>}</span>,
           },
         ] as InvColumn<Row>[])
       : []),
@@ -276,30 +304,21 @@ export default function PriceControlPage() {
           {
             key: "gp", pct: 10, header: "Gross profit", align: "center", render: (r) => {
               const sp = draftSp(r);
-              if (r.avg === undefined || !sp) return <span className="text-muted-foreground">—</span>;
-              const gp = sp - r.avg;
+              if (r.latest === undefined || !sp) return <span className="text-muted-foreground">—</span>;
+              const gp = sp - r.latest;
               return <span className={cn("font-bold tabular-nums", gp < 0 && "text-rose-600")}>{formatINR(gp)}</span>;
             },
           },
           {
             key: "margin", pct: 9, header: "Margin", align: "center", render: (r) => {
               const sp = draftSp(r);
-              if (r.avg === undefined || !sp) return <span className="text-[12px] text-muted-foreground">Cost not set</span>;
-              const m = ((sp - r.avg) / sp) * 100;
+              if (r.latest === undefined || !sp) return <span className="text-[12px] text-muted-foreground">Cost not set</span>;
+              const m = ((sp - r.latest) / sp) * 100;
               return <span className={cn("flex h-7 w-full min-w-0 items-center justify-center rounded-full px-2.5 text-[11px] font-bold tabular-nums ring-1 ring-inset", marginTone(m))}>{pct(m)}</span>;
             },
           },
         ] as InvColumn<Row>[])
       : []),
-    {
-      key: "edit", pct: 5, header: "Edit", align: "center", render: (r) => canEdit ? (
-        <button
-          onClick={() => setPartForm({ row: r, name: r.part.partName, sku: r.part.partNumber, price: String(r.part.price || ""), warranty: r.part.warranty || "30 Days" })}
-          title="Edit part details" aria-label={`Edit ${r.part.partName}`}
-          className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]"
-        ><Pencil className="h-4 w-4" /></button>
-      ) : null,
-    },
     { key: "stock", pct: 7, header: "Available", align: "center", render: (r) => r.item ? <span className="tabular-nums">{availableStock(r.item)}</span> : <span className="text-muted-foreground">—</span> },
     {
       key: "link", pct: 13, header: "Inventory link", align: "center", render: (r) =>
@@ -319,8 +338,20 @@ export default function PriceControlPage() {
         ),
     },
     {
-      key: "actions", pct: 6, header: "Actions", align: "center", render: (r) => !r.item || !canEdit ? <span className="text-muted-foreground">—</span> : (
-        <div className="flex justify-center">
+      key: "actions", pct: 9, header: "Actions", align: "center", render: (r) => !canEdit ? <span className="text-muted-foreground">—</span> : (
+        <div className="flex items-center justify-center gap-0.5">
+          <button
+          onClick={() => setPartForm({
+            row: r, name: r.part.partName, sku: r.part.partNumber,
+            price: draft[r.part.id] ?? String(r.sp || ""),
+            warranty: r.part.warranty || "30 Days",
+            cost: r.item?.costState === "configured" ? String(r.item.costPrice ?? "") : "",
+            stock: r.item ? String(r.item.currentStock ?? 0) : "",
+          })}
+          title="Edit this row" aria-label={`Edit ${r.part.partName}`}
+          className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]"
+        ><Pencil className="h-4 w-4" /></button>
+          {r.item && (
               <Dropdown
                 align="right"
                 width="w-48"
@@ -338,6 +369,7 @@ export default function PriceControlPage() {
                   </>
                 )}
               </Dropdown>
+          )}
         </div>
       ),
     },
@@ -358,7 +390,7 @@ export default function PriceControlPage() {
         actions={
           tab === "price" && canEdit ? (
             <div className="flex items-center gap-2">
-              <Button variant="outline" className="gap-2" disabled={!effModel} onClick={() => { setCreateAfterAdd(false); setPartForm({ row: null, name: "", sku: "", price: "", warranty: "30 Days" }); }}>
+              <Button variant="outline" className="gap-2" disabled={!effModel} onClick={() => { setCreateAfterAdd(false); setPartForm({ row: null, name: "", sku: "", price: "", warranty: "30 Days", cost: "", stock: "" }); }}>
                 <Plus className="h-4 w-4" />Add part
               </Button>
               <Button className="gap-2" onClick={save} disabled={saving || dirty.length === 0}>
@@ -379,7 +411,7 @@ export default function PriceControlPage() {
           onSelect={(m) => { setCatId(m.categoryId); setBrandId(m.brandId); setModelId(m.id); setTab("price"); }}
         />
         <div ref={setSearchSlot} className="contents" />
-        {tab === "price" && (
+        {tab === "price" && effModel && (
           <TableSearch
             value={partQ}
             onChange={setPartQ}
@@ -392,7 +424,15 @@ export default function PriceControlPage() {
         </div>
       </div>
 
-      {tab === "price" && (
+      {tab === "price" && !effModel && (
+        <div className="grid place-items-center rounded-2xl border-2 border-dashed border-[#4361EE]/30 bg-[#EEF1FD]/40 px-6 py-16 text-center">
+          <span className="grid h-12 w-12 place-items-center rounded-2xl bg-[#4361EE]/10 text-[#4361EE]"><Search className="h-6 w-6" /></span>
+          <p className="mt-3 font-display text-[16px] font-bold">Select a device to start</p>
+          <p className="mt-1 max-w-md text-[13px] text-muted-foreground">Use <span className="font-semibold text-[#4361EE]">Search device</span> above to pick a model. Its parts, prices and profit will load here.</p>
+        </div>
+      )}
+
+      {tab === "price" && effModel && (
         <>
           <p className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-[12.5px] text-muted-foreground">
             Showing parts for
@@ -413,7 +453,7 @@ export default function PriceControlPage() {
           {belowCost.length > 0 && (
             <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-[12.5px] text-rose-700">
               <TrendingDown className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>{belowCost.length === 1 ? `${belowCost[0].part.partName} is` : `${belowCost.length} prices are`} set below average cost and would sell at a loss.</span>
+              <span>{belowCost.length === 1 ? `${belowCost[0].part.partName} is` : `${belowCost.length} prices are`} set below the latest cost and would sell at a loss.</span>
             </div>
           )}
 
@@ -433,7 +473,7 @@ export default function PriceControlPage() {
               {MARGIN_BANDS.map((b) => <span key={b.label} className={cn("rounded-full px-2.5 py-0.5 text-[11px] font-bold ring-1 ring-inset", b.cls)}>{b.label}</span>)}
             </div>
           )}
-          {canViewCost && <p className="text-[12px] text-muted-foreground">Cost comes from the purchase ledger. Margin = (selling price − average cost) ÷ selling price.</p>}
+          {canViewCost && <p className="text-[12px] text-muted-foreground">Latest cost = cost price (updated by every received purchase). Avg. cost = average buying price of the last 3 months (* = no purchase in that time). Gross profit and margin use the latest cost.</p>}
         </>
       )}
 
@@ -513,7 +553,7 @@ export default function PriceControlPage() {
         footer={
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setPartForm(null)}>Cancel</Button>
-            <Button onClick={savePartForm}>{partForm?.row ? "Save changes" : "Add part"}</Button>
+            <Button onClick={savePartForm} disabled={savingForm}>{savingForm ? "Saving…" : partForm?.row ? "Save changes" : "Add part"}</Button>
           </div>
         }
       >
@@ -522,6 +562,47 @@ export default function PriceControlPage() {
             <div className="space-y-1.5 sm:col-span-2"><Label>Part name</Label><Input value={partForm.name} onChange={(e) => setPartForm({ ...partForm, name: e.target.value })} placeholder="e.g. Display Assembly" /></div>
             <div className="space-y-1.5"><Label>SKU / part number</Label><Input value={partForm.sku} onChange={(e) => setPartForm({ ...partForm, sku: e.target.value })} placeholder="Matches the inventory SKU to link" /></div>
             <div className="space-y-1.5"><Label>Warranty</Label><Select value={partForm.warranty} onChange={(e) => setPartForm({ ...partForm, warranty: e.target.value })} options={WARRANTIES.some((w) => w.value === partForm.warranty) ? WARRANTIES : [{ label: partForm.warranty, value: partForm.warranty }, ...WARRANTIES]} className="h-[36px]" /></div>
+            {partForm.row && (() => {
+              const item = partForm.row.item;
+              const sp = Number(partForm.price) || 0;
+              const avg = partForm.row.avg;
+              const costNum = partForm.cost.trim() !== "" ? Number(partForm.cost) : undefined;
+              // Profit preview uses the latest cost: the cost price being typed, else the current one.
+              const base = costNum ?? partForm.row.latest;
+              return (
+                <>
+                  <div className="space-y-1.5"><Label>Selling price (₹)</Label><Input inputMode="numeric" value={partForm.price} onChange={(e) => setPartForm({ ...partForm, price: e.target.value.replace(/[^0-9.]/g, "") })} placeholder="Set price" /></div>
+                  {item && canEditCost ? (
+                    <div className="space-y-1.5"><Label>Cost price (₹)</Label><Input inputMode="decimal" value={partForm.cost} onChange={(e) => setPartForm({ ...partForm, cost: e.target.value.replace(/[^0-9.]/g, "") })} placeholder="Not set" /></div>
+                  ) : <div />}
+                  {item && (
+                    <div className="space-y-1.5">
+                      <Label>Stock on hand</Label>
+                      <Input inputMode="numeric" disabled={!canAdjust} value={partForm.stock} onChange={(e) => setPartForm({ ...partForm, stock: e.target.value.replace(/[^0-9]/g, "") })} />
+                    </div>
+                  )}
+                  {item && canViewCost && (
+                    <div className="space-y-1.5">
+                      <Label>Avg. cost (3 months)</Label>
+                      <div className="flex h-[36px] items-center rounded-xl border border-border bg-muted/30 px-3 text-[13px] tabular-nums text-muted-foreground">
+                        {avg !== undefined ? formatINR(avg) : "—"}
+                      </div>
+                    </div>
+                  )}
+                  {canViewCost && base !== undefined && sp > 0 && (
+                    <div className="flex items-center justify-between rounded-xl border border-border bg-muted/20 px-4 py-2.5 sm:col-span-2">
+                      <span className="text-[12.5px] text-muted-foreground">Gross profit · Margin (on latest cost)</span>
+                      <span className="flex items-center gap-2 text-[13.5px] font-bold tabular-nums">
+                        <span className={cn(sp - base < 0 && "text-rose-600")}>{formatINR(sp - base)}</span>
+                        <span className={cn("rounded-full px-2.5 py-0.5 text-[11px] ring-1 ring-inset", marginTone(((sp - base) / sp) * 100))}>{pct(((sp - base) / sp) * 100)}</span>
+                      </span>
+                    </div>
+                  )}
+                  {!item && <p className="text-[12px] text-muted-foreground sm:col-span-2">Link this part to inventory to manage cost and stock.</p>}
+                  {item && <p className="text-[12px] text-muted-foreground sm:col-span-2">A stock change is saved as a stock adjustment in Stock Movement. Receiving a purchase (GRN) updates the cost price to that buying price.</p>}
+                </>
+              );
+            })()}
             {!partForm.row && (
               <>
                 <div className="space-y-1.5"><Label>Selling price (₹)</Label><Input inputMode="numeric" value={partForm.price} onChange={(e) => setPartForm({ ...partForm, price: e.target.value.replace(/[^0-9.]/g, "") })} placeholder="Optional" /></div>
@@ -533,7 +614,6 @@ export default function PriceControlPage() {
                 )}
               </>
             )}
-            {partForm.row && <p className="text-[12px] text-muted-foreground sm:col-span-2">Change the price in the table. Linked parts follow their inventory item.</p>}
           </div>
         )}
       </RoxCenteredForm>
@@ -573,7 +653,7 @@ function CostLedger({ inventory, layers, slot }: { inventory: InventoryItem[]; l
     { key: "loc", pct: 18, header: "Location", align: "center", render: (r) => <span className="truncate">{r.item.store || "—"}</span> },
     { key: "qty", pct: 10, header: "Qty", align: "center", render: (r) => <span className="tabular-nums">{r.item.currentStock}</span> },
     { key: "latest", pct: 14, header: "Latest cost", align: "center", render: (r) => <span className="tabular-nums">{r.latest !== undefined ? formatINR(r.latest) : "—"}</span> },
-    { key: "avg", pct: 14, header: "Weighted avg.", align: "center", render: (r) => <span className="font-bold tabular-nums">{r.avg !== undefined ? formatINR(r.avg) : "—"}</span> },
+    { key: "avg", pct: 14, header: "Avg. cost (3 mo.)", align: "center", render: (r) => <span className="font-bold tabular-nums">{r.avg !== undefined ? formatINR(r.avg) : "—"}</span> },
     {
       key: "chg", pct: 14, header: "Latest vs avg.", align: "center", render: (r) => {
         if (r.latest === undefined || !r.avg) return <span className="text-muted-foreground">—</span>;
@@ -587,7 +667,7 @@ function CostLedger({ inventory, layers, slot }: { inventory: InventoryItem[]; l
     <>
       {slot && createPortal(<TableSearch value={q} onChange={setQ} placeholder="Search SKU, part or location…" animatedPrefix="Search by " animatedWords={["SKU", "part", "location"]} className="w-full sm:w-64" />, slot)}
       <InvTable columns={columns} rows={rows} rowKey={(r) => r.item.id} flow resetKey={q} emptyTitle="No cost recorded yet" emptyHint="Costs appear after a purchase is received (GRN) or an item has a cost price." itemLabel="SKU" />
-      <p className="text-[12px] text-muted-foreground">Weighted average recalculates after a confirmed goods receipt. Pending purchases do not update cost. Purchases are recorded under Purchasing → Receive Stock (GRN).</p>
+      <p className="text-[12px] text-muted-foreground">Latest cost is the cost price; every confirmed goods receipt updates it. Avg. cost is the average buying price of the last 3 months. Pending purchases do not change either. Purchases are recorded under Purchasing → Receive Stock (GRN).</p>
     </>
   );
 }

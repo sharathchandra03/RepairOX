@@ -11,6 +11,7 @@ import {
   Info, MoreHorizontal, Pencil, Eye, Wrench, X, Tag,
   Image as ImageIcon, GripVertical, Copy, Settings2, Check,
   FileSpreadsheet, FileText, Loader2, Trash2, Images,
+  TrendingUp, TrendingDown,
 } from "lucide-react";
 import { cn, formatINR } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -1262,13 +1263,13 @@ function MetaItem({ icon: Icon, label, value, highlight }: {
 // flush beneath the app topbar with no gap.
 const STICKY_TOP = 60;
 
-/** Row tint + left accent for a recent price change (drop = warm/red, increase = blue). */
+/** Row tint + left accent for a recent price change (drop = green, increase = red). */
 function rowTone(part: DevicePart): string {
   const ch = priceChangeInfo(part);
   if (!ch) return "hover:bg-brand-50/40";
   return ch.direction === "drop"
-    ? "bg-orange-50 shadow-[inset_4px_0_0_0_#EF4444] hover:bg-orange-100/70"
-    : "bg-blue-50 shadow-[inset_4px_0_0_0_#3B5BDB] hover:bg-blue-100/70";
+    ? "bg-emerald-50 shadow-[inset_4px_0_0_0_#16A34A] hover:bg-emerald-100/70"
+    : "bg-rose-50 shadow-[inset_4px_0_0_0_#EF4444] hover:bg-rose-100/70";
 }
 type PartColKey = "image" | "part" | "price" | "warranty";
 const PART_COL_LABEL: Record<PartColKey, string> = {
@@ -1651,10 +1652,10 @@ function PartsAndPricing({
           const drop = ch.direction === "drop";
           return (
             <div className="ml-[14px] mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
-              <span className={cn("inline-flex h-6 items-center gap-1 rounded-full px-2.5 text-[11px] font-bold uppercase tracking-wide", drop ? "bg-rose-100 text-rose-700" : "bg-blue-100 text-blue-700")}>
-                <span aria-hidden>{drop ? "↓" : "↑"}</span>{drop ? "Price drop" : "Price increase"}
+              <span className={cn("inline-flex h-5 items-center gap-1 rounded-full px-2 text-[10px] font-bold uppercase tracking-wide", drop ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700")}>
+                {drop ? <TrendingDown className="h-3 w-3" /> : <TrendingUp className="h-3 w-3" />}{drop ? "Drop" : "Increase"}
               </span>
-              <span className="text-[12px] text-muted-foreground">{ch.daysLeft} day{ch.daysLeft === 1 ? "" : "s"} remaining</span>
+              <span className="text-[11px] text-muted-foreground">{ch.daysLeft}d left</span>
             </div>
           );
         })()}
@@ -1668,8 +1669,10 @@ function PartsAndPricing({
             ? <span className="mr-[5px] text-[14px] font-medium text-muted-foreground">N/A</span>
             : (
               <>
-                <span className="mr-[5px] block text-[16px] font-extrabold tracking-tight tabular-nums text-foreground">{formatINR(part.price)}</span>
-                {ch && <span className="mr-[5px] block text-[12.5px] tabular-nums text-muted-foreground line-through" title={`Previous price ${formatINR(ch.previous)}`}>{formatINR(ch.previous)}</span>}
+                <span className={cn("mr-[5px] inline-flex items-center justify-end gap-1 text-[16px] font-extrabold tracking-tight tabular-nums", ch ? (ch.direction === "drop" ? "text-emerald-700" : "text-rose-700") : "text-foreground")}>
+                  {ch && (ch.direction === "drop" ? <TrendingDown className="h-4 w-4" /> : <TrendingUp className="h-4 w-4" />)}{formatINR(part.price)}
+                </span>
+                {ch && <span className="mr-[5px] block text-[12px] tabular-nums text-muted-foreground line-through" title={`Previous price ${formatINR(ch.previous)}`}>{formatINR(ch.previous)}</span>}
               </>
             )}
         </td>
@@ -1954,7 +1957,16 @@ function PartDetailDrawer({ part, modelName, onClose }: { part: DevicePart | nul
             <DetailRow label="Part name">{part.partName}</DetailRow>
             <DetailRow label="Repair category"><RepairCategoryBadge category={part.repairCategory} /></DetailRow>
             <DetailRow label="Part number / SKU"><span className="font-mono text-[12px]">{part.partNumber || "—"}</span></DetailRow>
-            <DetailRow label="Price">{part.priceKnown === false ? "N/A" : <span className="font-bold">{formatINR(part.price)}</span>}</DetailRow>
+            <DetailRow label="Price">{part.priceKnown === false ? "N/A" : (() => {
+              const ch = priceChangeInfo(part);
+              return (
+                <span className="inline-flex flex-wrap items-center gap-2">
+                  <span className="font-bold">{formatINR(part.price)}</span>
+                  {ch && <span className="text-muted-foreground line-through">{formatINR(ch.previous)}</span>}
+                  {ch && <span className={ch.direction === "drop" ? "text-[11px] font-bold text-emerald-700" : "text-[11px] font-bold text-rose-700"}>{ch.direction === "drop" ? "↓ Price drop" : "↑ Price increase"}</span>}
+                </span>
+              );
+            })()}</DetailRow>
             <DetailRow label="Warranty">{part.warranty}</DetailRow>
             <DetailRow label="Availability">{part.priceKnown === false ? "N/A" : <AvailabilityBadge availability={part.availability} />}</DetailRow>
             <DetailRow label="Last updated">{part.lastUpdated}</DetailRow>

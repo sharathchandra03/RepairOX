@@ -155,7 +155,7 @@ export function validateInventoryForm(v: InventoryFormValues): string | null {
   if (v.kind === "part") {
     if (v.sellingPrice !== "" && Number(v.sellingPrice) < 0) return "Selling Price can't be negative";
     if (v.costPrice !== "" && Number(v.costPrice) < 0) return "Cost Price can't be negative";
-    if (v.trackStock && v.currentStock !== "" && Number(v.currentStock) > 0 && v.openingUnitCost === "")
+    if (v.trackStock && v.currentStock !== "" && Number(v.currentStock) > 0 && v.openingUnitCost === "" && v.costPrice === "")
       return "Enter the Opening Stock Unit Cost for the opening quantity";
   } else {
     if (v.serviceCharge !== "" && Number(v.serviceCharge) < 0) return "Service Charge can't be negative";
@@ -272,7 +272,7 @@ export function buildInventoryItem(
   const openingQty = Number(v.currentStock || 0);
   const opening: InventoryOpeningInput | undefined =
     !isService && item.trackStock && openingQty > 0
-      ? { qty: openingQty, unitCost: Number(v.openingUnitCost || 0) }
+      ? { qty: openingQty, unitCost: Number(v.openingUnitCost !== "" ? v.openingUnitCost : v.costPrice || 0) }
       : undefined;
 
   return { item, cost, opening };
@@ -799,8 +799,8 @@ export function InventoryItemFields({
                     <Input type="number" inputMode="numeric" value={values.currentStock} onChange={(e) => set({ currentStock: e.target.value })} placeholder="0" />
                   </Field>
                   {canViewCost && (
-                    <Field label="Opening Unit Cost" hint="Cost per unit of opening stock">
-                      <Input type="number" inputMode="decimal" value={values.openingUnitCost} onChange={(e) => set({ openingUnitCost: e.target.value })} placeholder="0" disabled={!canEditCost} iconLeft={<span className="text-[13px]">₹</span>} />
+                    <Field label="Opening Unit Cost" hint="Buying price per unit of this opening stock. Leave blank to use the Cost Price. It becomes the item's latest cost.">
+                      <Input type="number" inputMode="decimal" value={values.openingUnitCost} onChange={(e) => set({ openingUnitCost: e.target.value })} placeholder={values.costPrice !== "" ? values.costPrice : "0"} disabled={!canEditCost} iconLeft={<span className="text-[13px]">₹</span>} />
                     </Field>
                   )}
                   <Field label="Store">

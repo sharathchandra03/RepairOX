@@ -4,6 +4,8 @@ import {
   computeInvoiceProfitability,
   isEligibleForRealizedProfit,
   resolvePartUnitCost,
+  averagePurchaseCost,
+  latestUnitCost,
   toRevenueInvoiceLike,
   type CostingInvoiceLike,
   type StockLayerLike,
@@ -16,15 +18,15 @@ import type { Invoice } from "@/lib/mock-data";
  * (AC-15, AC-16)
  * ────────────────────────────────────────────────────────────────────────── */
 
-test("weighted-average cost over multiple layers (AC-16)", () => {
+test("3-month SIMPLE average of buying prices over multiple layers", () => {
   const layers: StockLayerLike[] = [
     { item_id: "PART", qty_in: 10, unit_cost: 100 }, // 1000
     { item_id: "PART", qty_in: 30, unit_cost: 200 }, // 6000
     { item_id: "OTHER", qty_in: 5, unit_cost: 999 }, // ignored
   ];
   const r = resolvePartUnitCost("PART", layers, { costPrice: 50, costState: "configured" });
-  // (1000 + 6000) / 40 = 175 — ledger wins over CP.
-  assert.deepEqual(r, { kind: "resolved", unitCost: 175, source: "ledger" });
+  // Simple average of buying prices (100 + 200) / 2 = 150 — not qty-weighted; ledger wins over CP.
+  assert.deepEqual(r, { kind: "resolved", unitCost: 150, source: "ledger" });
 });
 
 test("CP fallback when no layers exist (AC-16)", () => {
@@ -44,6 +46,37 @@ test("not_configured when neither layer nor configured CP (AC-15)", () => {
 test("configured-₹0 CP yields a valid resolved ₹0 cost (not not_configured)", () => {
   const r = resolvePartUnitCost("PART", [], { costPrice: 0, costState: "configured" });
   assert.deepEqual(r, { kind: "resolved", unitCost: 0, source: "cp" });
+});
+
+test("average only counts purchases from the last 90 days; adjustments excluded", () => {
+  const now = Date.parse("2026-11-24T00:00:00Z");
+  const day = 86_400_000;
+  const layers: StockLayerLike[] = [
+    { item_id: "PART", qty_in: 5, unit_cost: 1000, received_at: new Date(now - 200 * day).toISOString(), source: "purchase" }, // too old
+    { item_id: "PART", qty_in: 5, unit_cost: 2400, received_at: new Date(now - 60 * day).toISOString(), source: "purchase" },
+    { item_id: "PART", qty_in: 50, unit_cost: 2600, received_at: new Date(now - 10 * day).toISOString(), source: "opening" },
+    { item_id: "PART", qty_in: 3, unit_cost: 9999, received_at: new Date(now - 5 * day).toISOString(), source: "adjustment" }, // not a purchase
+  ];
+  assert.equal(averagePurchaseCost("PART", layers, now), 2500);
+  assert.deepEqual(resolvePartUnitCost("PART", layers, { costPrice: 2600, costState: "configured" }, now), { kind: "resolved", unitCost: 2500, source: "ledger" });
+});
+
+test("no purchase in the window → CP, then the last purchase price", () => {
+  const now = Date.parse("2026-11-24T00:00:00Z");
+  const old: StockLayerLike[] = [{ item_id: "PART", qty_in: 5, unit_cost: 1200, received_at: new Date(now - 400 * 86_400_000).toISOString(), source: "purchase" }];
+  assert.equal(averagePurchaseCost("PART", old, now), undefined);
+  assert.deepEqual(resolvePartUnitCost("PART", old, { costPrice: 1500, costState: "configured" }, now), { kind: "resolved", unitCost: 1500, source: "cp" });
+  assert.deepEqual(resolvePartUnitCost("PART", old, { costState: "not_configured" }, now), { kind: "resolved", unitCost: 1200, source: "ledger" });
+});
+
+test("latest cost = configured cost price, else the newest purchase", () => {
+  const layers: StockLayerLike[] = [
+    { item_id: "PART", qty_in: 5, unit_cost: 2400, received_at: "2026-10-01T00:00:00Z", source: "purchase" },
+    { item_id: "PART", qty_in: 5, unit_cost: 2700, received_at: "2026-11-01T00:00:00Z", source: "purchase" },
+  ];
+  assert.equal(latestUnitCost("PART", layers, { costPrice: 2500, costState: "configured" }), 2500);
+  assert.equal(latestUnitCost("PART", layers, { costState: "not_configured" }), 2700);
+  assert.equal(latestUnitCost("PART", [], { costState: "not_configured" }), undefined);
 });
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -389,16 +422,16 @@ function lineCostFromResolver(itemId: string, layers: StockLayerLike[], item: { 
   return { cost: r.unitCost, costState: r.source === "ledger" ? ("resolved" as const) : ("cp" as const) };
 }
 
-test("ledger layers drive the sold cost (weighted avg, 'resolved'); CP only when no layers (LEDGER-DISCONNECT)", () => {
+test("ledger layers drive the sold cost (3-month avg, 'resolved'); CP only when no layers (LEDGER-DISCONNECT)", () => {
   const item = { costPrice: 1000, costState: "configured" as const };
   const layers: StockLayerLike[] = [
     { item_id: "PART", qty_in: 10, unit_cost: 100 },
     { item_id: "PART", qty_in: 30, unit_cost: 200 },
     { item_id: "OTHER", qty_in: 99, unit_cost: 9999 }, // different item — ignored
   ];
-  // With layers → weighted average 175, provenance LEDGER (not the 1000 CP).
+  // With layers → simple 3-month average 150, provenance LEDGER (not the 1000 CP).
   const withLayers = lineCostFromResolver("PART", layers, item);
-  assert.deepEqual(withLayers, { cost: 175, costState: "resolved" });
+  assert.deepEqual(withLayers, { cost: 150, costState: "resolved" });
 
   // With NO layers for this item → falls back to the org CP (1000), provenance cp.
   const noLayers = lineCostFromResolver("PART", [{ item_id: "OTHER", qty_in: 5, unit_cost: 50 }], item);

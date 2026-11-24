@@ -35,8 +35,10 @@ export interface StockLayerLike {
   qty_in: number;
   /** Per-unit cost captured at receipt time. */
   unit_cost: number;
-  /** ISO receipt time (optional; used to find the LATEST purchase cost). */
+  /** ISO receipt time (optional; drives the 3-month average + latest purchase). */
   received_at?: string;
+  /** purchase | opening | adjustment | transfer… (optional for legacy rows). */
+  source?: string;
 }
 
 /** The subset of an InventoryItem the cost resolver reads. */
@@ -50,31 +52,90 @@ export type ResolvedCost =
   | { kind: "resolved"; unitCost: number; source: "ledger" | "cp" }
   | { kind: "not_configured" };
 
+/** Average cost looks back this many days of purchases. */
+export const AVG_COST_WINDOW_DAYS = 90;
+
+/** True for a layer that represents a real buying price (purchase / GRN / opening).
+ *  Adjustment and transfer layers are not purchases. Legacy layers without a
+ *  source are treated as purchases. */
+export function isPurchaseLayer(l: StockLayerLike): boolean {
+  return !l.source || l.source === "purchase" || l.source === "opening";
+}
+
 /**
- * Resolve the ACTUAL sold unit cost for a part (never `defaultPrice*0.7`).
+ * AVERAGE COST = simple average of the buying prices of purchases received in
+ * the last AVG_COST_WINDOW_DAYS days (not weighted by quantity). A layer with no
+ * receipt time is counted (legacy data). Undefined when there is no purchase in
+ * the window.
+ */
+export function averagePurchaseCost(
+  itemId: string,
+  layers: readonly StockLayerLike[],
+  now: number = Date.now(),
+  windowDays: number = AVG_COST_WINDOW_DAYS,
+): number | undefined {
+  const since = now - windowDays * 86_400_000;
+  const prices = layers
+    .filter((l) => l.item_id === itemId && isPurchaseLayer(l) && l.qty_in > 0)
+    .filter((l) => {
+      if (!l.received_at) return true;
+      const t = new Date(l.received_at).getTime();
+      return !Number.isFinite(t) || t >= since;
+    })
+    .map((l) => l.unit_cost);
+  if (prices.length === 0) return undefined;
+  return prices.reduce((s, p) => s + p, 0) / prices.length;
+}
+
+/** Most recent purchase buying price on the ledger (undefined when none). */
+export function lastPurchaseCost(itemId: string, layers: readonly StockLayerLike[]): number | undefined {
+  let best: StockLayerLike | undefined;
+  for (const l of layers) {
+    if (l.item_id !== itemId || !isPurchaseLayer(l) || l.qty_in <= 0) continue;
+    if (!best || (l.received_at ?? "") >= (best.received_at ?? "")) best = l;
+  }
+  return best?.unit_cost;
+}
+
+/**
+ * LATEST COST = the item's Cost price. A received purchase updates the cost
+ * price automatically in the database (migration 0125), so the configured CP is
+ * always the newest buying price. Falls back to the last purchase on the ledger
+ * when no CP is configured.
+ */
+export function latestUnitCost(
+  itemId: string,
+  layers: readonly StockLayerLike[],
+  item: CostableItemLike | undefined | null,
+): number | undefined {
+  if (item && item.costState === "configured" && typeof item.costPrice === "number" && item.costPrice >= 0) return item.costPrice;
+  return lastPurchaseCost(itemId, layers);
+}
+
+/**
+ * Resolve the unit cost used for INVOICE profitability (snapshotted on the line
+ * when the invoice is created, so later cost changes never rewrite old invoices).
  *
- * Resolution order (§3.3, MEDIUM-2):
- *  1. Weighted average over the item's stock layers (the real cost of stock that
- *     physically entered this store — layers are expected to already be
- *     branch-scoped by the caller): `Σ(qty_in · unit_cost) / Σ(qty_in)`.
- *  2. Org-level default CP from the item (only when `costState === "configured"`
- *     and the CP is a non-negative number).
- *  3. Otherwise "not configured".
+ * Resolution order:
+ *  1. Average purchase cost over the last AVG_COST_WINDOW_DAYS days
+ *     (simple average of buying prices) → source "ledger".
+ *  2. Org-level Cost price (configured, non-negative) → source "cp".
+ *  3. The last purchase price on the ledger (older than the window) → "ledger".
+ *  4. Otherwise "not configured".
  */
 export function resolvePartUnitCost(
   itemId: string,
   layers: readonly StockLayerLike[],
   item: CostableItemLike | undefined | null,
+  now: number = Date.now(),
 ): ResolvedCost {
-  const relevant = layers.filter((l) => l.item_id === itemId);
-  const totalQty = relevant.reduce((s, l) => s + l.qty_in, 0);
-  if (totalQty > 0) {
-    const totalValue = relevant.reduce((s, l) => s + l.qty_in * l.unit_cost, 0);
-    return { kind: "resolved", unitCost: totalValue / totalQty, source: "ledger" };
-  }
+  const avg = averagePurchaseCost(itemId, layers, now);
+  if (avg !== undefined) return { kind: "resolved", unitCost: avg, source: "ledger" };
   if (item && item.costState === "configured" && typeof item.costPrice === "number" && item.costPrice >= 0) {
     return { kind: "resolved", unitCost: item.costPrice, source: "cp" };
   }
+  const last = lastPurchaseCost(itemId, layers);
+  if (last !== undefined) return { kind: "resolved", unitCost: last, source: "ledger" };
   return { kind: "not_configured" };
 }
 

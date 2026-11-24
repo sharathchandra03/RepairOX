@@ -24,7 +24,7 @@ import type { MovementType } from "@/lib/inventory-data";
 type Adjust = { itemId: string; delta: number; label: string; type: MovementType; unitCost?: number; doc: string };
 
 export function useInventoryActions() {
-  const { inventory, addStockMovement, updateInventoryItem } = useStore();
+  const { inventory, addStockMovement, updateInventoryItem, noteReceiptLocally } = useStore();
   const { currentUser, isDemoMode } = usePermissions();
   const ops = useInventoryOps();
   const invRef = useRef(inventory); invRef.current = inventory;
@@ -40,6 +40,7 @@ export function useInventoryActions() {
       if (a.delta > 0 && a.type === "Inward" && a.unitCost !== undefined) {
         const { error } = await supabase.rpc("post_stock_receipt", { p_item_id: a.itemId, p_qty: a.delta, p_unit_cost: a.unitCost, p_source: "purchase" });
         if (error) { toast.error(`Stock post failed: ${error.message}`); return false; }
+        noteReceiptLocally(a.itemId, a.delta, a.unitCost, "purchase");
         return true;
       }
       const { error } = await supabase.rpc("post_stock_adjust", {
@@ -54,12 +55,13 @@ export function useInventoryActions() {
       return true;
     }
     await updateInventoryItem(a.itemId, { currentStock: item.currentStock + a.delta });
+    if (a.delta > 0 && a.type === "Inward" && a.unitCost !== undefined) noteReceiptLocally(a.itemId, a.delta, a.unitCost, "purchase");
     await addStockMovement({
       docNumber: a.doc, fromStore: a.delta > 0 ? a.label : item.store, toStore: a.delta > 0 ? item.store : a.label,
       items: Math.abs(a.delta), date: new Date().toLocaleDateString("en-IN"), user: who, type: a.type, status: "completed",
     }, { itemId: a.itemId });
     return true;
-  }, [useDb, updateInventoryItem, addStockMovement, who]);
+  }, [useDb, updateInventoryItem, addStockMovement, noteReceiptLocally, who]);
 
   /** Every line has enough stock for an outbound post. */
   const canRemove = useCallback((lines: DocLine[]): boolean => {

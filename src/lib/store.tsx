@@ -156,6 +156,9 @@ interface StoreActions {
   updateTeamMember: (email: string, updates: Partial<TeamMember>) => void;
   deductPartsForTicket: (ticketId: string) => Promise<void>;
   addStockMovement: (movement: StockMovement, opts?: { itemId?: string; unitCost?: number }) => Promise<void>;
+  /** Mirror a posted purchase receipt locally: adds the ledger layer and makes
+   *  its buying price the item's latest cost (the DB does the same, 0125). */
+  noteReceiptLocally: (itemId: string, qty: number, unitCost: number, source?: "purchase" | "opening") => void;
   addInventoryItem: (
     item: InventoryItem,
     opts?: {
@@ -1793,7 +1796,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // branches. The weighted-average valuation reads these FIRST (falling
         // back to org CP). Empty for a non-cost user. Store-scoped so an
         // All-Shops valuation sees every visible branch's layers.
-        scopeToStore(supabase.from("inventory_stock_layers").select("item_id, qty_in, unit_cost, received_at")),
+        scopeToStore(supabase.from("inventory_stock_layers").select("item_id, qty_in, unit_cost, received_at, source")),
       ]);
 
       if (!active) return;
@@ -1849,7 +1852,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         inventory: (invItems ?? []).map(rowToInventoryItem).map(mergeInventoryCosts),
         stockMovements: (moves ?? []).map(rowToStockMovement),
         inventoryStockLayers: ((stockLayers ?? []) as any[]).map((l) => ({
-          item_id: l.item_id, qty_in: Number(l.qty_in ?? 0), unit_cost: Number(l.unit_cost ?? 0), received_at: l.received_at ?? undefined,
+          item_id: l.item_id, qty_in: Number(l.qty_in ?? 0), unit_cost: Number(l.unit_cost ?? 0), received_at: l.received_at ?? undefined, source: l.source ?? undefined,
         })),
         customers: (custs ?? []).map(rowToCustomer),
         customerGroups: (custGroups ?? []).map(rowToCustomerGroup),
@@ -3969,6 +3972,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     logActivity({ module: "Inventory", action: "Stock Reduced", severity: "warning", entity: "Parts", reference: ticketId, description: `Deducted ${totalQty} part unit${totalQty !== 1 ? "s" : ""} for ticket ${ticketId}.`, meta: { "Parts consumed": String(partsToDeduct.length), Units: String(totalQty) } });
   }, []);
 
+  const noteReceiptLocally = useCallback((itemId: string, qty: number, unitCost: number, source: "purchase" | "opening" = "purchase") => {
+    if (!(qty > 0)) return;
+    setState((s) => ({
+      ...s,
+      inventoryStockLayers: [...s.inventoryStockLayers, { item_id: itemId, qty_in: qty, unit_cost: unitCost, received_at: new Date().toISOString(), source }],
+      inventory: unitCost > 0
+        ? s.inventory.map((i) => (i.id === itemId ? { ...i, costPrice: unitCost, costState: "configured" as const } : i))
+        : s.inventory,
+    }));
+  }, []);
   const addStockMovement = useCallback(async (movement: StockMovement, opts?: { itemId?: string; unitCost?: number }) => {
     if (shouldUseDb()) {
       // Purchase / Stock-In (FR-13 / review finding #9): an INWARD movement that
@@ -3988,6 +4001,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           p_source: "purchase",
         });
         if (rErr) { console.error("[store] addStockMovement receipt failed:", rErr.message); return; }
+        noteReceiptLocally(opts.itemId, movement.items, opts.unitCost, "purchase");
         setState((s) => ({ ...s, stockMovements: [movement, ...s.stockMovements] }));
         logActivity({ module: "Inventory", action: "Stock Increased", severity: "success", entity: "Stock Movement", reference: movement.docNumber, description: `Inward (purchase) movement of ${movement.items} item${movement.items !== 1 ? "s" : ""}: ${movement.fromStore} → ${movement.toStore}.` });
         return;
@@ -4062,7 +4076,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
       // Mirror the opening cost layer locally so weighted-average cost shows at
       // once (no reload). RLS already keeps layers away from non-cost users.
-      const openLayer = opening && saved.currentStock > 0 ? [{ item_id: saved.id, qty_in: opening.qty, unit_cost: opening.unitCost, received_at: new Date().toISOString() }] : [];
+      const openLayer = opening && saved.currentStock > 0 ? [{ item_id: saved.id, qty_in: opening.qty, unit_cost: opening.unitCost, received_at: new Date().toISOString(), source: "opening" }] : [];
+      // The DB makes the opening buying price the latest cost (0125); mirror it.
+      if (openLayer.length && opening!.unitCost > 0) saved = { ...saved, costPrice: opening!.unitCost, costState: "configured" };
       setState((s) => ({ ...s, inventory: [saved, ...s.inventory.filter((i) => i.id !== saved.id)], inventoryStockLayers: [...s.inventoryStockLayers, ...openLayer] }));
       logActivity({ module: "Inventory", action: "Item Added", severity: "success", entity: "Item", reference: saved.id, description: `Added new inventory item: ${saved.name}.`, meta: { Category: saved.category, Stock: String(saved.currentStock) } });
       return;
@@ -4079,7 +4095,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState((s) => ({
       ...s,
       inventory: [localItem, ...s.inventory],
-      inventoryStockLayers: opening ? [...s.inventoryStockLayers, { item_id: localItem.id, qty_in: opening.qty, unit_cost: opening.unitCost, received_at: new Date().toISOString() }] : s.inventoryStockLayers,
+      inventoryStockLayers: opening ? [...s.inventoryStockLayers, { item_id: localItem.id, qty_in: opening.qty, unit_cost: opening.unitCost, received_at: new Date().toISOString(), source: "opening" }] : s.inventoryStockLayers,
     }));
     logActivity({ module: "Inventory", action: "Item Added", severity: "success", entity: "Item", reference: localItem.id, description: `Added new inventory item: ${localItem.name}.`, meta: { Category: localItem.category, Stock: String(localItem.currentStock) } });
   }, [addStockMovement]);
@@ -4856,6 +4872,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     deductPartsForTicket,
     addStockMovement,
     addInventoryItem,
+    noteReceiptLocally,
     updateInventoryItem,
     reconcileMigrationFlag,
     deleteInventoryItem,
