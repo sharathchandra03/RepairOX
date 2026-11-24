@@ -46,6 +46,7 @@ export function AddInventoryModal({
   onCreated,
   /** Prefill the item name (e.g. the term the user just searched for). */
   initialName,
+  initialValues,
 }: {
   open: boolean;
   onClose: () => void;
@@ -53,12 +54,14 @@ export function AddInventoryModal({
    *  add it as an invoice line item. */
   onCreated?: (item: InventoryItem) => void;
   initialName?: string;
+  /** Prefill more fields (SKU, selling price, category, brand/model…). */
+  initialValues?: Partial<InventoryFormValues>;
 }) {
   const { can } = usePermissions();
   const { addInventoryItem } = useStore();
   const canCreate = allow(can, CAP.inventory.create);
 
-  const [values, setValues] = useState<InventoryFormValues>(() => ({ ...emptyInventoryForm(), name: initialName ?? "" }));
+  const [values, setValues] = useState<InventoryFormValues>(() => ({ ...emptyInventoryForm(), name: initialName ?? "", ...initialValues }));
   const [saving, setSaving] = useState(false);
   const [invalid, setInvalid] = useState<Set<InventoryFieldKey>>(() => new Set());
 
@@ -67,7 +70,7 @@ export function AddInventoryModal({
   const [lastOpen, setLastOpen] = useState(open);
   if (open !== lastOpen) {
     setLastOpen(open);
-    if (open) { setValues({ ...emptyInventoryForm(), name: initialName ?? "" }); setInvalid(new Set()); }
+    if (open) { setValues({ ...emptyInventoryForm(), name: initialName ?? "", ...initialValues }); setInvalid(new Set()); }
   }
 
   const patch = (p: Partial<InventoryFormValues>) => {

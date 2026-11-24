@@ -69,9 +69,34 @@ export type DevicePart = {
   priceKnown?: boolean;
   /** Optional part photo (base64/URL) so customers see what they're getting. */
   imageUrl?: string;
+  /** Price immediately before the latest change (shown struck through for a few days). */
+  previousPrice?: number;
+  /** ISO time of the latest price change. */
+  priceChangedAt?: string;
   /** True for built-in sample data; cleared automatically on first import. */
   seed?: boolean;
 };
+
+/* ─── Price change highlight ────────────────────────────────────────
+   After a price changes, the Price List shows the old price struck through and a
+   PRICE DROP / PRICE INCREASE tag for this many days. The previous price stays
+   stored (and in the audit log) after the window ends. */
+export const PRICE_CHANGE_WINDOW_DAYS = 7;
+export type PriceChangeInfo = { direction: "drop" | "increase"; previous: number; daysLeft: number; pct: number };
+export function priceChangeInfo(part: Pick<DevicePart, "price" | "previousPrice" | "priceChangedAt" | "priceKnown">, now = Date.now()): PriceChangeInfo | null {
+  if (part.priceKnown === false || !part.previousPrice || !part.priceChangedAt) return null;
+  if (part.previousPrice === part.price) return null;
+  const at = new Date(part.priceChangedAt).getTime();
+  if (!Number.isFinite(at)) return null;
+  const left = PRICE_CHANGE_WINDOW_DAYS - (now - at) / 86_400_000;
+  if (left <= 0) return null;
+  return {
+    direction: part.price < part.previousPrice ? "drop" : "increase",
+    previous: part.previousPrice,
+    daysLeft: Math.max(1, Math.ceil(left)),
+    pct: ((part.price - part.previousPrice) / part.previousPrice) * 100,
+  };
+}
 
 /* ─── Categories ─────────────────────────────────────────────────── */
 

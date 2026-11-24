@@ -36,6 +36,7 @@ import {
   type PriceListBrand,
   type PriceListModel,
   type DevicePart,
+  priceChangeInfo,
 } from "@/lib/price-list-data";
 
 /* ─── Icon Map ───────────────────────────────────────────────────── */
@@ -1261,6 +1262,14 @@ function MetaItem({ icon: Icon, label, value, highlight }: {
 // flush beneath the app topbar with no gap.
 const STICKY_TOP = 60;
 
+/** Row tint + left accent for a recent price change (drop = warm/red, increase = blue). */
+function rowTone(part: DevicePart): string {
+  const ch = priceChangeInfo(part);
+  if (!ch) return "hover:bg-brand-50/40";
+  return ch.direction === "drop"
+    ? "bg-orange-50 shadow-[inset_4px_0_0_0_#EF4444] hover:bg-orange-100/70"
+    : "bg-blue-50 shadow-[inset_4px_0_0_0_#3B5BDB] hover:bg-blue-100/70";
+}
 type PartColKey = "image" | "part" | "price" | "warranty";
 const PART_COL_LABEL: Record<PartColKey, string> = {
   image: "Image", part: "Part Name", price: "Price (INR)", warranty: "Warranty",
@@ -1636,15 +1645,36 @@ function PartsAndPricing({
         {part.repairCategory && (
           <p className="ml-[14px] mt-0.5 text-[11.5px] text-muted-foreground">{part.repairCategory}</p>
         )}
+        {(() => {
+          const ch = priceChangeInfo(part);
+          if (!ch) return null;
+          const drop = ch.direction === "drop";
+          return (
+            <div className="ml-[14px] mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              <span className={cn("inline-flex h-6 items-center gap-1 rounded-full px-2.5 text-[11px] font-bold uppercase tracking-wide", drop ? "bg-rose-100 text-rose-700" : "bg-blue-100 text-blue-700")}>
+                <span aria-hidden>{drop ? "↓" : "↑"}</span>{drop ? "Price drop" : "Price increase"}
+              </span>
+              <span className="text-[12px] text-muted-foreground">{ch.daysLeft} day{ch.daysLeft === 1 ? "" : "s"} remaining</span>
+            </div>
+          );
+        })()}
       </td>
     );
-    if (key === "price") return (
-      <td key={key} className="border-l border-border px-4 py-3 text-right align-middle">
-        {part.priceKnown === false
-          ? <span className="mr-[5px] text-[14px] font-medium text-muted-foreground">N/A</span>
-          : <span className="mr-[5px] text-[16px] font-extrabold tracking-tight tabular-nums text-foreground">{formatINR(part.price)}</span>}
-      </td>
-    );
+    if (key === "price") {
+      const ch = priceChangeInfo(part);
+      return (
+        <td key={key} className="border-l border-border px-4 py-3 text-right align-middle">
+          {part.priceKnown === false
+            ? <span className="mr-[5px] text-[14px] font-medium text-muted-foreground">N/A</span>
+            : (
+              <>
+                <span className="mr-[5px] block text-[16px] font-extrabold tracking-tight tabular-nums text-foreground">{formatINR(part.price)}</span>
+                {ch && <span className="mr-[5px] block text-[12.5px] tabular-nums text-muted-foreground line-through" title={`Previous price ${formatINR(ch.previous)}`}>{formatINR(ch.previous)}</span>}
+              </>
+            )}
+        </td>
+      );
+    }
     // warranty
     return (
       <td key={key} className="border-l border-border px-4 py-3 text-center align-middle">
@@ -1842,7 +1872,7 @@ function PartsAndPricing({
             </thead>
             <tbody>
                 {pageParts.map((part, idx) => (
-                  <tr key={part.id} className="border-b border-border transition-colors hover:bg-brand-50/40">
+                  <tr key={part.id} className={cn("border-b border-border transition-colors", rowTone(part))}>
                     <td className="pl-4 pr-2 py-3 text-left align-middle text-[13px] font-semibold tabular-nums text-muted-foreground">{(safePage - 1) * pageSize + idx + 1}</td>
                     {order.map((key) => bodyCell(key, part))}
                     <td className="border-l border-border py-3 px-4 align-middle">

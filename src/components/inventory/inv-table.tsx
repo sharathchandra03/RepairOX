@@ -19,6 +19,7 @@
 
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { RoxTableHead, RoxHeadRow, RoxTableRow, RoxTableCell } from "@/components/ui/rox-table";
+import { useRoxStickyHeader } from "@/components/ui/rox-table";
 import { Pagination } from "@/components/ui/pagination";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
@@ -35,13 +36,15 @@ export type InvColumn<T> = {
   /** Maximum width in px for a compact text column; overflow is ellipsised. */
   max?: number;
   hidden?: boolean;
+  /** Share of the table width in `flow` mode (relative; normalised across visible columns). */
+  pct?: number;
   /** Ignored. Kept so older call sites compile; sizing is automatic now. */
   width?: number | string;
 };
 
 export function InvTable<T>({
   columns, rows, rowKey, onRowClick, itemLabel = "item", emptyTitle = "Nothing to show", emptyHint, rowTint, resetKey,
-  selectable = false, selected, onSelectedChange, selectLabel = "Select all",
+  selectable = false, selected, onSelectedChange, selectLabel = "Select all", flow = false,
 }: {
   columns: InvColumn<T>[];
   rows: T[];
@@ -58,6 +61,9 @@ export function InvTable<T>({
   selected?: Set<string>;
   onSelectedChange?: (next: Set<string>) => void;
   selectLabel?: string;
+  /** Tickets-style layout: the PAGE scrolls (no closed box), the header sticks under the topbar,
+   *  columns share the full width by their `pct`, and the pagination footer follows the last row. */
+  flow?: boolean;
 }) {
   const cols = useMemo(() => columns.filter((c) => !c.hidden), [columns]);
   const [page, setPage] = useState(1);
@@ -67,6 +73,8 @@ export function InvTable<T>({
   const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
   const safePage = Math.min(page, totalPages);
   const paged = useMemo(() => rows.slice((safePage - 1) * pageSize, safePage * pageSize), [rows, safePage, pageSize]);
+  const { theadTop } = useRoxStickyHeader();
+  const pctSum = cols.reduce((n, c) => n + (c.pct ?? 0), 0);
   const align = (a?: string) => (a === "right" ? "text-right" : a === "center" ? "text-center" : "text-left");
 
   const sel = selected ?? new Set<string>();
@@ -86,10 +94,16 @@ export function InvTable<T>({
 
   return (
     <>
-      <div className="rox-lock-grow flex flex-col border-2 border-zinc-300 bg-card shadow-card">
-        <div className="rox-grid-scroll min-h-0 flex-1 overflow-auto">
-          <table className="w-full text-[14px]">
-            <RoxTableHead top={0}>
+      <div className={cn("border-zinc-300 bg-card shadow-card border-2", flow ? "" : "rox-lock-grow flex flex-col")}>
+        <div className={flow ? "[overflow-x:clip]" : "rox-grid-scroll min-h-0 flex-1 overflow-auto"}>
+          <table className={cn("w-full text-[14px]", flow && "table-fixed")}>
+            {flow && (
+              <colgroup>
+                {selectable && <col style={{ width: 44 }} />}
+                {cols.map((c) => <col key={c.key} style={{ width: `${((c.pct ?? 100 / cols.length) / (pctSum || 100)) * 100}%` }} />)}
+              </colgroup>
+            )}
+            <RoxTableHead top={flow ? theadTop : 0}>
               <RoxHeadRow>
                 {selectable && (
                   <th className="w-[1%] whitespace-nowrap py-4 pl-4 pr-1">
@@ -97,7 +111,7 @@ export function InvTable<T>({
                   </th>
                 )}
                 {cols.map((c) => (
-                  <th key={c.key} style={sizeStyle(c)} className={cn("rox-table-cell whitespace-nowrap py-4 font-bold", align(c.align))}>{c.header}</th>
+                  <th key={c.key} style={flow ? undefined : sizeStyle(c)} className={cn("rox-table-cell whitespace-nowrap py-4 font-bold", align(c.align))}>{c.header}</th>
                 ))}
               </RoxHeadRow>
             </RoxTableHead>
@@ -118,7 +132,7 @@ export function InvTable<T>({
                       </td>
                     )}
                     {cols.map((c) => (
-                      <RoxTableCell key={c.key} style={c.grow ? { maxWidth: 0, minWidth: c.min ?? 220 } : undefined} className={cn(align(c.align), c.grow ? "overflow-hidden" : "whitespace-nowrap")}>
+                      <RoxTableCell key={c.key} style={!flow && c.grow ? { maxWidth: 0, minWidth: c.min ?? 220 } : undefined} className={cn(align(c.align), flow ? "overflow-hidden" : c.grow ? "overflow-hidden" : "whitespace-nowrap")}>
                         {c.max ? <div className="truncate" style={{ maxWidth: c.max }}>{c.render(r)}</div> : c.render(r)}
                       </RoxTableCell>
                     ))}
@@ -138,7 +152,7 @@ export function InvTable<T>({
         </div>
       </div>
       <Pagination
-        className="rox-lock-footer"
+        className={flow ? undefined : "rox-lock-footer"}
         page={safePage}
         totalPages={totalPages}
         onPageChange={setPage}

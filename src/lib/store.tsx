@@ -1793,7 +1793,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // branches. The weighted-average valuation reads these FIRST (falling
         // back to org CP). Empty for a non-cost user. Store-scoped so an
         // All-Shops valuation sees every visible branch's layers.
-        scopeToStore(supabase.from("inventory_stock_layers").select("item_id, qty_in, unit_cost")),
+        scopeToStore(supabase.from("inventory_stock_layers").select("item_id, qty_in, unit_cost, received_at")),
       ]);
 
       if (!active) return;
@@ -1849,7 +1849,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         inventory: (invItems ?? []).map(rowToInventoryItem).map(mergeInventoryCosts),
         stockMovements: (moves ?? []).map(rowToStockMovement),
         inventoryStockLayers: ((stockLayers ?? []) as any[]).map((l) => ({
-          item_id: l.item_id, qty_in: Number(l.qty_in ?? 0), unit_cost: Number(l.unit_cost ?? 0),
+          item_id: l.item_id, qty_in: Number(l.qty_in ?? 0), unit_cost: Number(l.unit_cost ?? 0), received_at: l.received_at ?? undefined,
         })),
         customers: (custs ?? []).map(rowToCustomer),
         customerGroups: (custGroups ?? []).map(rowToCustomerGroup),
@@ -2024,7 +2024,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const item = rowToInventoryItem(row);
             const idx = prev.inventory.findIndex((i) => i.id === row.id);
             if (idx === -1) return { ...prev, inventory: [item, ...prev.inventory] };
-            const next = [...prev.inventory]; next[idx] = item;
+            // The inventory_items row never carries cost (it lives on the cost-gated
+            // inventory_item_costs table), so keep the cost fields already merged in.
+            const old = prev.inventory[idx];
+            const next = [...prev.inventory];
+            next[idx] = { ...item, costPrice: old.costPrice, standardLabourCost: old.standardLabourCost, costState: old.costState };
             return { ...prev, inventory: next };
           }
           case "stock_movements": {
@@ -4056,7 +4060,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      setState((s) => ({ ...s, inventory: [saved, ...s.inventory] }));
+      // Mirror the opening cost layer locally so weighted-average cost shows at
+      // once (no reload). RLS already keeps layers away from non-cost users.
+      const openLayer = opening && saved.currentStock > 0 ? [{ item_id: saved.id, qty_in: opening.qty, unit_cost: opening.unitCost, received_at: new Date().toISOString() }] : [];
+      setState((s) => ({ ...s, inventory: [saved, ...s.inventory.filter((i) => i.id !== saved.id)], inventoryStockLayers: [...s.inventoryStockLayers, ...openLayer] }));
       logActivity({ module: "Inventory", action: "Item Added", severity: "success", entity: "Item", reference: saved.id, description: `Added new inventory item: ${saved.name}.`, meta: { Category: saved.category, Stock: String(saved.currentStock) } });
       return;
     }
@@ -4069,7 +4076,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ? { costPrice: opts.cost.costPrice, standardLabourCost: opts.cost.standardLabourCost, costState: "configured" as const }
         : {}),
     };
-    setState((s) => ({ ...s, inventory: [localItem, ...s.inventory] }));
+    setState((s) => ({
+      ...s,
+      inventory: [localItem, ...s.inventory],
+      inventoryStockLayers: opening ? [...s.inventoryStockLayers, { item_id: localItem.id, qty_in: opening.qty, unit_cost: opening.unitCost, received_at: new Date().toISOString() }] : s.inventoryStockLayers,
+    }));
     logActivity({ module: "Inventory", action: "Item Added", severity: "success", entity: "Item", reference: localItem.id, description: `Added new inventory item: ${localItem.name}.`, meta: { Category: localItem.category, Stock: String(localItem.currentStock) } });
   }, [addStockMovement]);
 

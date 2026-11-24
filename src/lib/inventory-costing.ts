@@ -35,6 +35,8 @@ export interface StockLayerLike {
   qty_in: number;
   /** Per-unit cost captured at receipt time. */
   unit_cost: number;
+  /** ISO receipt time (optional; used to find the LATEST purchase cost). */
+  received_at?: string;
 }
 
 /** The subset of an InventoryItem the cost resolver reads. */

@@ -47,7 +47,7 @@ export const INVENTORY_NAV: InvNavSection[] = [
     items: [
       { href: "/inventory/item-master", label: "Item Master", icon: Boxes },
       { href: "/inventory/add-item", label: "Add Item", icon: PlusCircle, permission: CAP.inventory.create },
-      { href: "/inventory/price-sync", label: "Price List Link", icon: BadgeDollarSign },
+      { href: "/inventory/price-control", label: "Price List Edit", icon: BadgeDollarSign },
       { href: "/inventory/part-grades", label: "Part Grades & Variants", icon: Layers },
     ],
   },

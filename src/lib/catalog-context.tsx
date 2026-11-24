@@ -283,7 +283,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
           categories: sortCategories((cats ?? []).map(rowToCategory)),
           brands: (brds ?? []).map((r: any) => ({ id: r.id, name: r.name ?? "", categoryId: r.category_id ?? "", count: r.item_count ?? 0, logoUrl: r.logo_url ?? undefined, enabled: r.enabled ?? true })),
           models: (mods ?? []).map((r: any) => ({ id: r.id, name: r.name ?? "", brandId: r.brand_id ?? "", categoryId: r.category_id ?? "", year: r.model_year ?? new Date().getFullYear(), chip: r.chip ?? undefined, storage: r.storage ?? undefined, displaySize: r.display_size ?? undefined, variant: r.variant ?? undefined, imageUrl: r.image_url ?? undefined, status: r.status ?? "active", meta: r.meta ?? undefined, lastUpdated: r.updated_at ?? r.created_at ?? "", updatedBy: "", createdOn: r.created_at ?? "" })),
-          parts: (prts ?? []).map((r: any) => ({ id: Number(r.id) || 0, modelId: r.model_id ?? "", partName: r.part_name ?? "", partNumber: r.part_number ?? "", price: Number(r.price ?? 0), priceKnown: r.price_known ?? true, warranty: r.warranty ?? "N/A", availability: r.availability ?? "In Stock", repairCategory: r.repair_category ?? undefined, imageUrl: r.image_url ?? undefined, lastUpdated: r.updated_at ?? r.created_at ?? "" })),
+          parts: (prts ?? []).map((r: any) => ({ id: Number(r.id) || 0, modelId: r.model_id ?? "", partName: r.part_name ?? "", partNumber: r.part_number ?? "", price: Number(r.price ?? 0), priceKnown: r.price_known ?? true, warranty: r.warranty ?? "N/A", availability: r.availability ?? "In Stock", repairCategory: r.repair_category ?? undefined, imageUrl: r.image_url ?? undefined, previousPrice: r.previous_price != null ? Number(r.previous_price) : undefined, priceChangedAt: r.price_changed_at ?? undefined, lastUpdated: r.updated_at ?? r.created_at ?? "" })),
         };
         // Only use DB data if there's actual content; otherwise fall through to seed.
         if (dbState.categories.length > 0 || dbState.brands.length > 0) {
@@ -337,7 +337,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
           let q = supabase!.from("price_list_parts").select("*").order("created_at", { ascending: true }).order("id", { ascending: true });
           if (orgIdRef.current) q = q.eq("organization_id", orgIdRef.current);
           q.then(({ data }) => {
-            if (data) setState((s) => ({ ...s, parts: data.map((r: any) => ({ id: Number(r.id) || 0, modelId: r.model_id ?? "", partName: r.part_name ?? "", partNumber: r.part_number ?? "", price: Number(r.price ?? 0), priceKnown: r.price_known ?? true, warranty: r.warranty ?? "N/A", availability: r.availability ?? "In Stock", repairCategory: r.repair_category ?? undefined, imageUrl: r.image_url ?? undefined, lastUpdated: r.updated_at ?? r.created_at ?? "" })) }));
+            if (data) setState((s) => ({ ...s, parts: data.map((r: any) => ({ id: Number(r.id) || 0, modelId: r.model_id ?? "", partName: r.part_name ?? "", partNumber: r.part_number ?? "", price: Number(r.price ?? 0), priceKnown: r.price_known ?? true, warranty: r.warranty ?? "N/A", availability: r.availability ?? "In Stock", repairCategory: r.repair_category ?? undefined, imageUrl: r.image_url ?? undefined, previousPrice: r.previous_price != null ? Number(r.previous_price) : undefined, priceChangedAt: r.price_changed_at ?? undefined, lastUpdated: r.updated_at ?? r.created_at ?? "" })) }));
           });
         })
         .subscribe();
@@ -675,9 +675,16 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
 
   const updatePart = useCallback((id: number, updates: Partial<DevicePart>) => {
     const prev = stateRef.current.parts.find((p) => p.id === id);
+    // Remember the price being replaced so the Price List can show it struck
+    // through. The DB trigger does the same (migration 0124); this mirrors it
+    // locally for instant UI + demo mode.
+    const trackPrice: Partial<DevicePart> =
+      "price" in updates && prev && prev.priceKnown !== false && prev.price > 0 && (updates.price ?? 0) > 0 && updates.price !== prev.price
+        ? { previousPrice: prev.price, priceChangedAt: new Date().toISOString() }
+        : {};
     setState((s) => ({
       ...s,
-      parts: s.parts.map((p) => (p.id === id ? { ...p, ...updates, lastUpdated: nowStamp() } : p)),
+      parts: s.parts.map((p) => (p.id === id ? { ...p, ...updates, ...trackPrice, lastUpdated: nowStamp() } : p)),
     }));
     if (isSupabaseConfigured && supabase) {
       const row: Record<string, unknown> = {};
