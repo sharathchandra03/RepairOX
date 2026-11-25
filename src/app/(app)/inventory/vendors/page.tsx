@@ -18,7 +18,8 @@ import { useInventoryOps } from "@/lib/inventory-ops-context";
 import { usePermissions } from "@/lib/permissions-context";
 import { CAP, allow } from "@/lib/capabilities";
 import type { Vendor } from "@/lib/inventory-ops";
-import { cn } from "@/lib/utils";
+import { cn, formatINR } from "@/lib/utils";
+import { vendorPayables } from "@/lib/vendor-payables";
 
 const blank = (id: string): Vendor => ({ id, name: "", contactPerson: "", phone: "", email: "", gstNumber: "", address: "", paymentTerms: "", leadTimeDays: undefined, notes: "", active: true });
 const field = "mt-1.5 h-[34px] w-full rounded-xl border border-input bg-card px-3 text-[13px] outline-none focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15";
@@ -37,6 +38,8 @@ export default function VendorsPage() {
     return m;
   }, [docs]);
 
+  const canCost = allow(can, CAP.sensitive.viewCost);
+  const pay = useMemo(() => vendorPayables(docs, vendors), [docs, vendors]);
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     return vendors.filter((v) => !q || `${v.name} ${v.contactPerson} ${v.phone} ${v.email} ${v.gstNumber}`.toLowerCase().includes(q));
@@ -59,6 +62,11 @@ export default function VendorsPage() {
     { key: "terms", header: "Payment terms", render: (v) => <span className="block truncate text-muted-foreground">{v.paymentTerms || "—"}</span> },
     { key: "lead", header: "Lead time", align: "right", render: (v) => <span className="tabular-nums text-muted-foreground">{v.leadTimeDays != null ? `${v.leadTimeDays} d` : "—"}</span> },
     { key: "po", header: "Open POs", align: "right", render: (v) => <span className="font-semibold tabular-nums">{openPos.get(v.name) ?? 0}</span> },
+    { key: "due", header: "Outstanding", align: "right", hidden: !canCost, render: (v) => {
+      const r = pay.byVendor.get(v.name);
+      if (!r || r.outstanding <= 0) return <span className="text-muted-foreground">—</span>;
+      return <div className="text-right"><p className="font-bold tabular-nums">{formatINR(r.outstanding)}</p>{r.overdue > 0 && <p className="text-[11px] font-semibold text-rose-600">{formatINR(r.overdue)} past due</p>}</div>;
+    } },
     { key: "status", min: 130, header: "Status", render: (v) => <span className={cn("flex h-7 w-full items-center justify-center rounded-full px-2.5 text-[11px] font-semibold ring-1 ring-inset", v.active ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-zinc-100 text-zinc-600 ring-zinc-200")}>{v.active ? "Active" : "Inactive"}</span> },
   ];
 

@@ -23,6 +23,7 @@ import { usePermissions } from "@/lib/permissions-context";
 import { CAP, allow } from "@/lib/capabilities";
 import { DOC_META, docUnits, docValue, type DocAction } from "@/lib/inventory-ops";
 import { cn, formatINR } from "@/lib/utils";
+import { grnBalance, grnDueDate, grnPaid } from "@/lib/vendor-payables";
 
 const TH = "px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-[#4361EE]";
 
@@ -30,7 +31,7 @@ export default function InventoryDocPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { can } = usePermissions();
-  const { getDoc, saveDoc, removeDoc, ready } = useInventoryOps();
+  const { getDoc, saveDoc, removeDoc, ready, vendors } = useInventoryOps();
   const { runAction, createDoc } = useInventoryActions();
   const { inventory } = useInventoryScope();
   const doc = getDoc(decodeURIComponent(id));
@@ -38,6 +39,8 @@ export default function InventoryDocPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [editTransfer, setEditTransfer] = useState(false);
   const [pending, setPending] = useState<DocAction | null>(null);
+  const [payAmt, setPayAmt] = useState("");
+  const [payNote, setPayNote] = useState("");
   const [counts, setCounts] = useState<Record<string, string>>({});
 
   const meta = doc ? DOC_META[doc.type] : null;
@@ -93,6 +96,17 @@ export default function InventoryDocPage() {
     if (grn) router.push(`/inventory/docs/${grn.id}`);
   }
 
+  async function recordPayment() {
+    if (!doc || busy) return;
+    const amt = Math.round(Number(payAmt) * 100) / 100;
+    const bal = grnBalance(doc);
+    if (!(amt > 0)) { toast.error("Enter the amount paid"); return; }
+    if (amt > bal + 0.001) { toast.error(`Only ${formatINR(bal)} is outstanding on this bill`); return; }
+    setBusy(true);
+    const ok = await saveDoc({ ...doc, data: { ...doc.data, paidAmount: grnPaid(doc) + amt, lastPaymentAt: new Date().toISOString(), lastPaymentNote: payNote.trim() || null } });
+    setBusy(false);
+    if (ok) { toast.success(`${formatINR(amt)} recorded against ${doc.id}`); setPayAmt(""); setPayNote(""); }
+  }
   const itemById = (itemId: string) => inventory.find((i) => i.id === itemId);
   const linkedRef = doc.ref && /^(PO|GRN|RMA|TRF|CNT|WO|OLD|WCL)-/.test(doc.ref) ? `/inventory/docs/${doc.ref}` : undefined;
   const notes = typeof doc.data.notes === "string" ? doc.data.notes : "";
@@ -232,6 +246,33 @@ export default function InventoryDocPage() {
               {actions.length === 0 && doc.status !== "draft" && <li className="text-muted-foreground">No further actions for this status.</li>}
             </ul>
           </div>
+          {doc.type === "grn" && doc.status === "posted" && (() => {
+            const bal = grnBalance(doc), due = grnDueDate(doc, vendors), late = bal > 0 && due.getTime() < Date.now();
+            return (
+              <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Vendor payment</h3>
+                <div className="mt-3 space-y-1.5 text-[13px]">
+                  <div className="flex justify-between"><span className="text-muted-foreground">Bill value</span><b className="tabular-nums">{formatINR(docValue(doc))}</b></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Paid</span><b className="tabular-nums text-emerald-600">{formatINR(grnPaid(doc))}</b></div>
+                  <div className="flex justify-between border-t border-border pt-1.5"><span className="font-semibold">Outstanding</span><b className={cn("tabular-nums", bal > 0 ? (late ? "text-rose-600" : "text-foreground") : "text-emerald-600")}>{bal > 0 ? formatINR(bal) : "Paid in full"}</b></div>
+                  {bal > 0 && <p className={cn("text-[12px]", late ? "font-semibold text-rose-600" : "text-muted-foreground")}>{late ? "Past due since " : "Due "}{fmtDate(due.toISOString())}</p>}
+                  {typeof doc.data.lastPaymentAt === "string" && <p className="text-[12px] text-muted-foreground">Last payment {fmtDate(doc.data.lastPaymentAt)}{typeof doc.data.lastPaymentNote === "string" ? ` · ${doc.data.lastPaymentNote}` : ""}</p>}
+                </div>
+                {bal > 0 && allow(can, CAP.inventory.purchase) && (
+                  <div className="mt-4 space-y-2">
+                    <input type="number" min={0} step="0.01" value={payAmt} onChange={(e) => setPayAmt(e.target.value)} placeholder={`Amount paid (max ${formatINR(bal)})`} aria-label="Amount paid"
+                      className="h-[36px] w-full rounded-xl border border-input bg-card px-3 text-[13px] tabular-nums outline-none focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15" />
+                    <input value={payNote} onChange={(e) => setPayNote(e.target.value)} placeholder="Reference, e.g. UPI / cheque no. (optional)" aria-label="Payment reference"
+                      className="h-[36px] w-full rounded-xl border border-input bg-card px-3 text-[13px] outline-none focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15" />
+                    <div className="flex gap-2">
+                      <Button className="flex-1" onClick={recordPayment} disabled={busy}>Record payment</Button>
+                      <Button variant="outline" onClick={() => setPayAmt(String(bal))} disabled={busy}>Full</Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           {notes && (
             <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Notes</h3>

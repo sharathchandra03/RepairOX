@@ -8,6 +8,7 @@ import {
 } from "@/lib/inventory-analytics";
 import { docUnits, type InvDoc, type Serial, type Vendor } from "@/lib/inventory-ops";
 import type { InventoryItem } from "@/lib/inventory-data";
+import { vendorPayables } from "@/lib/vendor-payables";
 
 type InvoiceLike = Parameters<typeof buildForecast>[1];
 export type Tone = "danger" | "warning" | "info" | "success";
@@ -184,6 +185,8 @@ export function buildInventoryInsights(input: {
     vendorSpend.set(d.party, row);
   }
 
+  const payables = vendorPayables(docs, vendors, now);
+
   /* insights, most urgent first */
   const ins: (Insight & { w: number })[] = [];
   const add = (w: number, i: Insight) => ins.push({ ...i, w });
@@ -194,6 +197,7 @@ export function buildInventoryInsights(input: {
   if (staleTransit.length > 0) add(80, { id: "stale", tone: "warning", title: `${staleTransit.length} transfer${staleTransit.length === 1 ? " has" : "s have"} been in transit over 3 days`, detail: "Stock is out of the source store but not received yet.", href: "/inventory/stock-movement", cta: "Receive" });
   if (countsPending.length > 0) add(75, { id: "counts", tone: "warning", title: `${countsPending.length} stock count${countsPending.length === 1 ? " needs" : "s need"} approval`, detail: "Variances are not corrected until approved.", href: "/inventory/stock-count", cta: "Review" });
   if (idleValue > 0 && stockValue > 0 && idleValue / stockValue >= 0.1) add(70, { id: "idle", tone: "warning", title: `${Math.round((idleValue / stockValue) * 100)}% of stock value has not sold in 90 days`, detail: `${idle.length} item${idle.length === 1 ? "" : "s"} tie up this money. Discount, return or stop reordering.`, href: "/inventory/forecast", cta: "Review" });
+  if (payables.overdue > 0) add(82, { id: "pay", tone: "danger", title: `${new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(payables.overdue)} owed to vendors is past due`, detail: "Bills past the vendor's payment terms. Pay or agree new dates.", href: "/inventory/vendors", cta: "See vendors" });
   if (transfersRequested.length > 0) add(60, { id: "trf", tone: "info", title: `${transfersRequested.length} transfer${transfersRequested.length === 1 ? " is" : "s are"} waiting to be dispatched`, detail: "Stock has not left the source store yet.", href: "/inventory/stock-movement", cta: "Dispatch" });
   if (grnDrafts.length > 0) add(55, { id: "grn", tone: "info", title: `${grnDrafts.length} received delivery${grnDrafts.length === 1 ? " is" : "ies are"} not posted to stock`, detail: "Goods are on the shelf but not in the system.", href: "/inventory/receive-stock", cta: "Post" });
   if (returnsOpen.length + claimsOpen.length + oldPending.length > 0) add(50, { id: "ret", tone: "info", title: `${returnsOpen.length + claimsOpen.length + oldPending.length} return / claim item${returnsOpen.length + claimsOpen.length + oldPending.length === 1 ? "" : "s"} still open`, detail: `${returnsOpen.length} vendor returns · ${claimsOpen.length} warranty claims · ${oldPending.length} old parts`, href: "/inventory/vendor-returns", cta: "Follow up" });
@@ -203,7 +207,7 @@ export function buildInventoryInsights(input: {
   const insights = ins.sort((a, b) => b.w - a.w).map(({ w: _w, ...rest }) => { void _w; return rest; });
 
   return {
-    itemCatalog, healthy, useCost, valueOf, units, reserved, stockValue, sellValue, hasDemand, forecast,
+    itemCatalog, healthy, payables, useCost, valueOf, units, reserved, stockValue, sellValue, hasDemand, forecast,
     counts, overstock, idle, idleValue, score, atRisk, outWithDemand, coverBuckets, abc, topA, byLocation, byCategory,
     fastMovers, slowMovers, fastCount, slowCount, margin, pipeline, onOrderUnits, onOrderValue, unitsInTransit, openPOs: openPOs.length,
     losses, lossUnits, lossValue, reorder, vendorSpend: [...vendorSpend.values()].sort((a, b) => b.open - a.open).slice(0, 5), insights, planOf,

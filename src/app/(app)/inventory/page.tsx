@@ -13,7 +13,7 @@ import {
 } from "recharts";
 import {
   AlertOctagon, AlertTriangle, ArrowRight, Boxes, CheckCircle2, Clock, HeartPulse, IndianRupee, Info, LayoutDashboard,
-  PackageCheck, PlusCircle, Sparkles, Truck, Upload, Zap,
+  PackageCheck, PlusCircle, Sparkles, Truck, Upload, Wallet, Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SegmentedTabs } from "@/components/ui/tabs";
@@ -76,21 +76,29 @@ export default function StockSummaryPage() {
 
       {/* KPIs: value, items, then the signals that need decisions */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
-        <InvKpi label={d.useCost ? "Stock Value (Cost)" : "Stock Value"} value={compactINR(d.stockValue)}
-          hint={d.useCost ? `${compactINR(d.sellValue)} if sold at selling price` : "At selling price"} icon={IndianRupee} tone="emerald" />
-        <InvKpi label="Items · SKUs" value={<>{formatNumber(d.itemCatalog.mainItems)}<span className="text-[15px] font-bold text-muted-foreground"> items</span></>}
+        <InvKpi label="Stock Value" value={compactINR(d.stockValue)}
+          hint={d.useCost ? `At cost · ${compactINR(d.sellValue)} if sold at selling price` : "At selling price"} icon={IndianRupee} tone="emerald" />
+        <InvKpi label="Items" value={<>{formatNumber(d.itemCatalog.mainItems)}<span className="text-[15px] font-bold text-muted-foreground"> items</span></>}
           hint={`${formatNumber(d.itemCatalog.skus)} SKUs, ${formatNumber(d.units)} units on hand`} icon={Boxes} href="/inventory/item-master" />
-        <InvKpi label="Inventory Health" value={stockItems.length ? `${d.score}%` : "—"}
-          hint={stockItems.length ? `${d.healthy} of ${stockItems.length} SKUs are in stock, not overstocked and selling` : "No items yet"}
-          hintTone={d.score >= 75 ? "success" : d.score < 50 ? "danger" : "muted"} icon={HeartPulse} tone={scoreTone} />
+        {canViewCost ? (
+          <InvKpi label="Vendor Dues" value={compactINR(d.payables.outstanding)}
+            hint={d.payables.outstanding > 0
+              ? `Owed to ${d.payables.vendors} vendor${d.payables.vendors === 1 ? "" : "s"} on ${d.payables.bills} bill${d.payables.bills === 1 ? "" : "s"}${d.payables.overdue > 0 ? `, ${compactINR(d.payables.overdue)} past due` : ", none past due"}`
+              : "Nothing owed to vendors"}
+            hintTone={d.payables.overdue > 0 ? "danger" : d.payables.outstanding > 0 ? "muted" : "success"} icon={Wallet} tone="amber" href="/inventory/vendors" />
+        ) : (
+          <InvKpi label="Inventory Health" value={stockItems.length ? `${d.score}%` : "—"}
+            hint={stockItems.length ? `${d.healthy} of ${stockItems.length} SKUs are in stock, not overstocked and selling` : "No items yet"}
+            hintTone={d.score >= 75 ? "success" : d.score < 50 ? "danger" : "muted"} icon={HeartPulse} tone={scoreTone} />
+        )}
         <InvKpi label="Idle Capital" value={d.hasDemand ? compactINR(d.idleValue) : "—"}
           hint={d.hasDemand ? `${idlePct}% of stock value is in ${d.idle.length} SKUs with no sale in 90 days` : "Needs billed invoices"}
           hintTone={idlePct >= 20 ? "danger" : "muted"} icon={Clock} tone="sky" href="/inventory/forecast" />
         <InvKpi label="Stock-out Risk" value={d.hasDemand ? d.atRisk.length : "—"}
           hint={d.hasDemand ? (d.atRisk.length ? `${d.atRisk.length} SKUs will run out before a reorder arrives (${d.outWithDemand} already out)` : "Every selling SKU has enough cover") : "Needs billed invoices"}
           hintTone={d.atRisk.length ? "danger" : "success"} icon={AlertOctagon} tone="rose" href="/inventory/forecast" />
-        <InvKpi label="On Order & In Transit" value={`${formatNumber(d.onOrderUnits + d.unitsInTransit)} units`}
-          hint={`${d.openPOs} open PO${d.openPOs === 1 ? "" : "s"}${canViewCost && d.onOrderValue ? ` worth ${compactINR(d.onOrderValue)}` : ""}, ${p.transfersMoving} transfer${p.transfersMoving === 1 ? "" : "s"} moving`}
+        <InvKpi label="On Order" value={`${formatNumber(d.onOrderUnits + d.unitsInTransit)} units`}
+          hint={`On open POs and in transfer · ${d.openPOs} open PO${d.openPOs === 1 ? "" : "s"}${canViewCost && d.onOrderValue ? ` worth ${compactINR(d.onOrderValue)}` : ""}, ${p.transfersMoving} transfer${p.transfersMoving === 1 ? "" : "s"} moving`}
           icon={Truck} tone="violet" href="/inventory/purchase-orders" />
       </div>
 

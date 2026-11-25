@@ -76,12 +76,12 @@ export function InvKpi({
   const body = (
     <div
       className={cn(
-        "flex h-full items-start justify-between gap-3 rounded-xl border-2 border-zinc-200 bg-card p-4 shadow-card transition",
+        "flex h-full items-center justify-between gap-3 rounded-xl border-2 border-zinc-200 bg-card p-4 shadow-card transition",
         href && "hover:border-[#4361EE]/40 hover:shadow-card-hover"
       )}
     >
-      <div className="min-w-0">
-        <p className="text-[12px] font-semibold text-muted-foreground">{label}</p>
+      <div className="min-w-0 flex-1">
+        <p className="truncate whitespace-nowrap text-[12px] font-semibold text-muted-foreground" title={label}>{label}</p>
         <p className="font-display mt-1 whitespace-nowrap text-[1.6rem] font-extrabold leading-none tracking-tight tabular-nums">{value}</p>
         {hint && (
           <p className={cn("mt-2 text-[11.5px] font-medium leading-snug", hintTone === "danger" ? "text-rose-600" : hintTone === "success" ? "text-emerald-600" : "text-muted-foreground")}>
@@ -89,8 +89,8 @@ export function InvKpi({
           </p>
         )}
       </div>
-      <span className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-full", KPI_TONE[tone])}>
-        <Icon className="h-[18px] w-[18px]" />
+      <span className={cn("grid h-12 w-12 shrink-0 place-items-center rounded-full", KPI_TONE[tone])}>
+        <Icon className="h-6 w-6" />
       </span>
     </div>
   );
