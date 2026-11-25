@@ -8,7 +8,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AlertTriangle, Boxes, Copy, IndianRupee, MoreHorizontal, Pencil, Plus, Tag, Trash2, Upload, Wrench, X } from "lucide-react";
+import { Boxes, Copy, MoreHorizontal, Pencil, Plus, Tag, Trash2, Upload, Wrench, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Can } from "@/components/common/can";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -17,13 +17,13 @@ import { Select } from "@/components/ui/input";
 import { TableSearch } from "@/components/common/table-utility-bar";
 import { InvTable, type InvColumn } from "@/components/inventory/inv-table";
 import { ExportMenu } from "@/components/inventory/export-menu";
-import { InvKpi, InvPageHeader, StatusTabs, StockStatusPill, useInventoryScope } from "@/components/inventory/inv-ui";
+import { InvPageHeader, StatusTabs, StockStatusPill, useInventoryScope } from "@/components/inventory/inv-ui";
 import { toast } from "@/components/ui/toaster";
 import { useStore } from "@/lib/store";
 import { usePermissions } from "@/lib/permissions-context";
 import { CAP, allow } from "@/lib/capabilities";
-import { effectiveSellingPrice, stockStatus, stockTotals } from "@/lib/inventory-analytics";
-import { compactINR, exportStock } from "@/lib/inventory-export";
+import { effectiveSellingPrice, stockStatus } from "@/lib/inventory-analytics";
+import { exportStock } from "@/lib/inventory-export";
 import { cn, formatINR } from "@/lib/utils";
 import type { InventoryItem } from "@/lib/inventory-data";
 
@@ -87,9 +87,6 @@ function ItemMasterInner() {
     });
   }, [inventory, tab, category, location, query]);
 
-  const totals = useMemo(() => stockTotals(inventory.filter((i) => i.active && isTracked(i))), [inventory]);
-  const useCost = canViewCost && totals.costValue !== undefined;
-  const missingPrice = inventory.filter((i) => i.active && effectiveSellingPrice(i) <= 0 && kindOf(i) === "part").length;
   const selectedItems = useMemo(() => inventory.filter((i) => selected.has(i.id)), [inventory, selected]);
 
   async function confirmDelete() {
@@ -129,20 +126,24 @@ function ItemMasterInner() {
         </div>
       ),
     },
-    { key: "type", header: "Type", min: 84, render: (r) => <span className={cn("flex h-7 w-full items-center justify-center rounded-full px-2.5 text-[11px] font-semibold ring-1 ring-inset", kindOf(r) === "service" ? "bg-violet-50 text-violet-700 ring-violet-200" : "bg-sky-50 text-sky-700 ring-sky-200")}>{kindOf(r) === "service" ? "Service" : "Part"}</span> },
+    { key: "type", header: "Type", align: "center", min: 84, render: (r) => <span className={cn("flex h-7 w-full items-center justify-center rounded-full px-2.5 text-[11px] font-semibold ring-1 ring-inset", kindOf(r) === "service" ? "bg-violet-50 text-violet-700 ring-violet-200" : "bg-sky-50 text-sky-700 ring-sky-200")}>{kindOf(r) === "service" ? "Service" : "Part"}</span> },
     { key: "category", header: "Category", max: 150, render: (r) => <span title={r.category}>{r.category || "—"}</span> },
     { key: "loc", header: "Location", max: 120, render: (r) => <span className="text-muted-foreground" title={r.store}>{r.store || "—"}</span> },
     {
-      key: "stock", header: "Stock", align: "right",
+      key: "stock", header: "Stock", align: "center",
       render: (r) => isTracked(r)
-        ? <div className="flex items-center justify-end gap-2"><span className={cn("font-semibold tabular-nums", r.currentStock < 0 && "text-rose-600")}>{r.currentStock}</span><span className="w-[104px]"><StockStatusPill status={stockStatus(r)} /></span></div>
+        ? <span className={cn("font-semibold tabular-nums", r.currentStock < 0 && "text-rose-600")}>{r.currentStock}</span>
         : <span className="text-muted-foreground">—</span>,
     },
-    { key: "sell", header: "Selling Price", align: "right", render: (r) => { const p = kindOf(r) === "service" ? r.serviceCharge || effectiveSellingPrice(r) : effectiveSellingPrice(r); return <span className={cn("font-semibold tabular-nums", p <= 0 && "text-amber-600")}>{p > 0 ? formatINR(p) : "Not set"}</span>; } },
-    { key: "mrp", header: "MRP", align: "right", render: (r) => <span className="tabular-nums text-muted-foreground">{r.mrp ? formatINR(r.mrp) : "—"}</span> },
-    { key: "cost", header: "Cost", align: "right", hidden: !canViewCost, render: (r) => { const c = kindOf(r) === "service" ? r.standardLabourCost : r.costPrice; return <span className="tabular-nums text-muted-foreground">{c !== undefined && r.costState === "configured" ? formatINR(c) : "—"}</span>; } },
-    { key: "margin", header: "Margin", align: "right", hidden: !canViewCost, render: (r) => { const m = marginPct(r); return m === null ? <span className="text-muted-foreground">—</span> : <span className={cn("font-semibold tabular-nums", m < 15 ? "text-amber-600" : "text-emerald-600")}>{m}%</span>; } },
-    { key: "tax", header: "GST · HSN", render: (r) => <div className="leading-tight"><span className="font-semibold tabular-nums">{r.tax}%</span><span className="block font-mono text-[11px] text-muted-foreground">{r.hsnCode && r.hsnCode !== "—" ? r.hsnCode : "no HSN"}</span></div> },
+    {
+      key: "status", header: "Status", align: "center", min: 120,
+      render: (r) => isTracked(r) ? <StockStatusPill status={stockStatus(r)} /> : <span className="text-muted-foreground">—</span>,
+    },
+    { key: "sell", header: "Selling Price", align: "center", render: (r) => { const p = kindOf(r) === "service" ? r.serviceCharge || effectiveSellingPrice(r) : effectiveSellingPrice(r); return <span className={cn("font-semibold tabular-nums", p <= 0 && "text-amber-600")}>{p > 0 ? formatINR(p) : "Not set"}</span>; } },
+    { key: "mrp", header: "MRP", align: "center", render: (r) => <span className="tabular-nums text-muted-foreground">{r.mrp ? formatINR(r.mrp) : "—"}</span> },
+    { key: "cost", header: "Cost", align: "center", hidden: !canViewCost, render: (r) => { const c = kindOf(r) === "service" ? r.standardLabourCost : r.costPrice; return <span className="tabular-nums text-muted-foreground">{c !== undefined && r.costState === "configured" ? formatINR(c) : "—"}</span>; } },
+    { key: "margin", header: "Margin", align: "center", hidden: !canViewCost, render: (r) => { const m = marginPct(r); return m === null ? <span className="text-muted-foreground">—</span> : <span className={cn("font-semibold tabular-nums", m < 15 ? "text-amber-600" : "text-emerald-600")}>{m}%</span>; } },
+    { key: "tax", header: "GST · HSN", align: "center", render: (r) => <div className="leading-tight"><span className="font-semibold tabular-nums">{r.tax}%</span><span className="block font-mono text-[11px] text-muted-foreground">{r.hsnCode && r.hsnCode !== "—" ? r.hsnCode : "no HSN"}</span></div> },
     { key: "vendor", header: "Vendor", max: 140, render: (r) => <span className="text-muted-foreground" title={r.vendor}>{r.vendor || "—"}</span> },
     {
       key: "actions", header: "", align: "right", min: 52,
@@ -182,12 +183,6 @@ function ItemMasterInner() {
         }
       />
 
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <InvKpi label="Total items" value={counts.all} hint={`${counts.part} parts · ${counts.service} services`} icon={Boxes} />
-        <InvKpi label={useCost ? "Stock value (cost)" : "Stock value"} value={compactINR(useCost ? (totals.costValue as number) : totals.sellValue)} hint={useCost ? `${compactINR(totals.sellValue)} at selling price` : "At selling price"} icon={IndianRupee} tone="emerald" />
-        <InvKpi label="Needs attention" value={counts.attention} hint={counts.attention ? "Low or out of stock" : "All healthy"} hintTone={counts.attention ? "danger" : "success"} icon={AlertTriangle} tone="amber" />
-        <InvKpi label="No selling price" value={missingPrice} hint={missingPrice ? "Set a price before billing" : "All parts priced"} hintTone={missingPrice ? "danger" : "success"} icon={Tag} tone="rose" />
-      </div>
 
       <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <StatusTabs

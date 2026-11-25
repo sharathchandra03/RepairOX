@@ -176,6 +176,9 @@ export function applyChrome(choice: ChromeChoice | null | undefined) {
   const ln = lineById(ch.line);
   const pillFrom = pill?.from ?? sb.pill.from;
   set("--chrome-line", ln.color ?? pillFrom.slice(0, 7));
+  // Always-visible accent from the same choice (for borders): the hover-line colour,
+  // or the active-pill colour when the user picked "No line" (transparent).
+  set("--chrome-accent", !ln.color || ln.color === "transparent" ? pillFrom.slice(0, 7) : ln.color);
   set("--chrome-pill-from", pillFrom); set("--chrome-pill-to", pill?.to ?? sb.pill.to); set("--chrome-pill-text", pill?.text ?? sb.pill.text);
   root.dataset.chromeSide = sb.tone; root.dataset.chromeHead = hd.tone;
 }

@@ -6,9 +6,9 @@
    the section holding the current page is open. Plan: docs/inventory-redesign-plan.md
    ────────────────────────────────────────────────────────────────────────── */
 import {
-  LayoutDashboard, Boxes, PlusCircle, Table2, BadgeDollarSign, AlertTriangle,
+  LayoutDashboard, Boxes, PlusCircle, BadgeDollarSign, AlertTriangle,
   TrendingUp, ArrowLeftRight, ShieldAlert, BadgeCheck, ScanBarcode, FileSpreadsheet,
-  Truck, ClipboardList, Recycle, ClipboardCheck, Smartphone, Undo2, Lock,
+  Truck, ClipboardList, Recycle, ClipboardCheck, Smartphone, Undo2,
   Layers, Wrench, type LucideIcon,
 } from "lucide-react";
 import { CAP } from "@/lib/capabilities";
@@ -19,6 +19,8 @@ export type InvNavItem = {
   icon: LucideIcon;
   /** OR-set of permission keys (CAP.*). Omitted = anyone who can open Inventory. */
   permission?: readonly string[];
+  /** Live count chip shown beside the label (computed in the sidebar). */
+  badge?: "lowStock";
 };
 
 export type InvNavSection = {
@@ -37,7 +39,6 @@ export const INVENTORY_NAV: InvNavSection[] = [
     icon: LayoutDashboard,
     items: [
       { href: "/inventory", label: "Stock Summary", icon: LayoutDashboard },
-      { href: "/inventory/stock-details", label: "Stock Details", icon: Table2 },
     ],
   },
   {
@@ -56,13 +57,12 @@ export const INVENTORY_NAV: InvNavSection[] = [
     label: "Stock Control",
     icon: AlertTriangle,
     items: [
-      { href: "/inventory/low-stock", label: "Low Stock Alerts", icon: AlertTriangle },
+      { href: "/inventory/low-stock", label: "Low Stock Alerts", icon: AlertTriangle, badge: "lowStock" },
       { href: "/inventory/forecast", label: "Stock Forecast", icon: TrendingUp },
-      { href: "/inventory/stock-movement", label: "Stock Movement", icon: ArrowLeftRight },
+      { href: "/inventory/stock-movement", label: "Stock Transfer", icon: ArrowLeftRight },
       { href: "/inventory/loss-damage", label: "Loss / Damage", icon: ShieldAlert },
       { href: "/inventory/approvals", label: "Approvals", icon: BadgeCheck },
-      { href: "/inventory/stock-count", label: "Stock Count (Audit)", icon: ClipboardCheck },
-      { href: "/inventory/reservations", label: "Ticket Reservations", icon: Lock },
+      { href: "/inventory/stock-count", label: "Stock Audit", icon: ClipboardCheck },
     ],
   },
   {
@@ -74,7 +74,6 @@ export const INVENTORY_NAV: InvNavSection[] = [
       { href: "/inventory/purchase-orders", label: "Purchase Orders", icon: ClipboardList, permission: CAP.inventory.purchase },
       { href: "/inventory/receive-stock", label: "Receive Stock (GRN)", icon: Recycle, permission: CAP.inventory.purchase },
       { href: "/inventory/vendor-returns", label: "Vendor Returns (RMA)", icon: Undo2, permission: CAP.inventory.purchase },
-      { href: "/inventory/transfers", label: "Store Transfers", icon: ArrowLeftRight },
     ],
   },
   {

@@ -1745,7 +1745,7 @@ html, body {
   --chrome-side-from: #4D5C8C; --chrome-side-via: #455383; --chrome-side-to: #3C4977;
   --chrome-head-from: #4D5C8C; --chrome-head-via: #475686; --chrome-head-to: #3F4C7B;
   --chrome-side-border: #33406B; --chrome-head-border: #33406B;
-  --chrome-pill-from: #6F87FF; --chrome-pill-to: #4F6BF5; --chrome-line: #4361EE;
+  --chrome-pill-from: #6F87FF; --chrome-pill-to: #4F6BF5; --chrome-line: #4361EE; --chrome-accent: #4361EE;
   --chrome-side-text: #FFFFFF; --chrome-head-text: #FFFFFF; --chrome-pill-text: #FFFFFF;
   --chrome-ctl-bg: rgba(67,97,238,0.07); --chrome-ctl-border: rgba(67,97,238,0.28);
 }

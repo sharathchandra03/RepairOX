@@ -157,6 +157,49 @@ export function buildForecast(items: InventoryItem[], invoices: InvoiceLike[], h
   return rows;
 }
 
+/* ── Forecast plan (demand × lead time) ─────────────────────────────────
+   daily sales = units sold ÷ days in the sales window
+   forecast demand = daily sales × horizon
+   days of cover = available ÷ daily sales
+   buffer = cover − supplier lead time (days left before you must order)
+   Urgent  : out of stock, or cover ≤ lead time (the order is already late)
+   Soon    : buffer ≤ SOON_BUFFER_DAYS
+   Healthy : otherwise · No demand : nothing sold in the window */
+export const SOON_BUFFER_DAYS = 7;
+export const DEFAULT_LEAD_DAYS = 7;
+export type ForecastStatus = "urgent" | "soon" | "healthy" | "none";
+export type ForecastPlan = {
+  row: ForecastRow;
+  perDay: number;
+  demand: number;
+  cover: number | null;
+  leadDays: number;
+  leadAssumed: boolean;
+  buffer: number | null;
+  stockOutDate: Date | null;
+  orderByDate: Date | null;
+  suggested: number;
+  status: ForecastStatus;
+};
+export function planForecast(row: ForecastRow, opts: { horizon: number; basis: 30 | 90; leadDays?: number; now?: number }): ForecastPlan {
+  const now = opts.now ?? Date.now();
+  const perDay = (opts.basis === 30 ? row.sold30 : row.sold90) / opts.basis;
+  const avail = Math.max(availableStock(row.item), 0);
+  const leadAssumed = opts.leadDays === undefined;
+  const leadDays = opts.leadDays ?? DEFAULT_LEAD_DAYS;
+  const demand = Math.ceil(perDay * opts.horizon);
+  const cover = perDay > 0 ? avail / perDay : null;
+  const buffer = cover === null ? null : cover - leadDays;
+  const at = (d: number) => new Date(now + Math.max(d, 0) * 86_400_000);
+  const status: ForecastStatus = cover === null ? "none" : cover <= leadDays ? "urgent" : buffer! <= SOON_BUFFER_DAYS ? "soon" : "healthy";
+  return {
+    row, perDay, demand, cover, leadDays, leadAssumed, buffer,
+    stockOutDate: cover === null ? null : at(cover),
+    orderByDate: buffer === null ? null : at(buffer),
+    suggested: perDay > 0 ? Math.max(demand + (row.item.minStock ?? 0) - avail, 0) : 0,
+    status,
+  };
+}
 /* ── Movements ──────────────────────────────────────────────────────────── */
 
 /** Movement dates are stored as en-IN "dd/mm/yyyy" strings by the app and as ISO by the DB. */

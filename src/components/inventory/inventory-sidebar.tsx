@@ -21,6 +21,8 @@ import { cn } from "@/lib/utils";
 import { Logo } from "@/components/ui/logo";
 import { ThinScroll } from "@/components/layout/thin-scroll";
 import { SidebarTooltip } from "@/components/layout/sidebar-tooltip";
+import { useStore } from "@/lib/store";
+import { isStockItem, stockStatus } from "@/lib/inventory-analytics";
 import { usePermissions } from "@/lib/permissions-context";
 import { ICON_ANIM } from "@/components/layout/sidebar";
 import { INVENTORY_NAV, sectionForPath, type InvNavItem } from "@/lib/inventory-nav";
@@ -39,10 +41,33 @@ function itemActive(pathname: string, href: string): boolean {
   return href === "/inventory" ? pathname === "/inventory" : pathname === href || pathname.startsWith(href + "/");
 }
 
+function AlertChip({ out, total, active, dot }: { out: number; total: number; active?: boolean; dot?: boolean }) {
+  if (total <= 0) return null;
+  const tone = out > 0 ? "bg-rose-500 text-white" : "bg-amber-400 text-amber-950";
+  const title = out > 0 ? `${out} out of stock · ${total - out} low` : `${total} low on stock`;
+  if (dot) return <span title={title} className={cn("absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full px-1 text-[9px] font-bold leading-none ring-2 ring-[color:var(--chrome-side-from)]", tone)}>{total > 99 ? "99+" : total}</span>;
+  return (
+    <span title={title} className={cn("relative ml-auto inline-flex h-[18px] min-w-[20px] shrink-0 items-center justify-center rounded-full px-1.5 text-[10.5px] font-bold tabular-nums leading-none shadow-sm", tone, active && "ring-1 ring-white/70")}>
+      {out > 0 && <span className="absolute inset-0 animate-ping rounded-full bg-rose-400/40 motion-reduce:hidden" />}
+      <span className="relative">{total > 99 ? "99+" : total}</span>
+    </span>
+  );
+}
 export function InventorySidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { can } = usePermissions();
+  const { inventory } = useStore();
+  /* Live low-stock numbers for the sidebar chip: red when anything is out of stock, amber when only low. */
+  const stockAlert = useMemo(() => {
+    let out = 0, low = 0;
+    for (const i of inventory) {
+      if (!isStockItem(i)) continue;
+      const st = stockStatus(i);
+      if (st === "out") out++; else if (st === "low") low++;
+    }
+    return { out, low, total: out + low };
+  }, [inventory]);
   const [collapsed, setCollapsed] = useState(false);
   const [query, setQuery] = useState("");
   const [openId, setOpenId] = useState<string | null>(() => sectionForPath(pathname) ?? "overview");
@@ -118,7 +143,7 @@ export function InventorySidebar() {
           <button
             onClick={() => router.push("/dashboard")}
             className={cn(
-              "group flex h-9 items-center justify-center gap-2 rounded-full border border-white/30 bg-[#2B3553] text-[13px] font-semibold text-white transition hover:bg-[#1B2238] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40",
+              "group flex h-9 items-center justify-center gap-2 rounded-full border-[1.5px] border-[color:var(--chrome-accent)] bg-[#2B3553] shadow-[0_0_0_3px_color-mix(in_srgb,var(--chrome-accent)_18%,transparent)] text-[13px] font-semibold text-white transition hover:bg-[#1B2238] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40",
               collapsed ? "mx-auto w-10 px-0" : "w-full px-4"
             )}
           >
@@ -173,6 +198,7 @@ export function InventorySidebar() {
                       aria-label={s.label}
                     >
                       <SecIcon className={cn(ICON_ANIM, "h-[18px] w-[18px]")} />
+                      {s.items.some((it) => it.badge === "lowStock") && <AlertChip out={stockAlert.out} total={stockAlert.total} dot />}
                     </button>
                   </SidebarTooltip>
                 </li>
@@ -189,6 +215,7 @@ export function InventorySidebar() {
                   <span className={cn(HOVER_LINE, "bottom-1 left-3 right-3 h-0.5")} />
                   <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center"><SecIcon className={cn(ICON_ANIM, "h-[18px] w-[18px]")} /></span>
                   <span className={cn("flex-1 truncate", LABEL)}>{s.label}{hasActive && !open && <span className="ml-2 inline-block h-1.5 w-1.5 rounded-full bg-[color:var(--chrome-line)] align-middle" />}</span>
+                  {!open && s.items.some((it) => it.badge === "lowStock") && <AlertChip out={stockAlert.out} total={stockAlert.total} />}
                   <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 transition-transform", open && "rotate-180")} />
                 </button>
                 <AnimatePresence initial={false}>
@@ -219,6 +246,7 @@ export function InventorySidebar() {
                               {!active && <span className={cn(HOVER_LINE, "bottom-0.5 left-2.5 right-2.5 h-0.5")} />}
                               <span className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center"><Icon className={cn(ICON_ANIM, "h-[15px] w-[15px]")} /></span>
                               <span className={cn("relative flex-1 truncate", LABEL)}>{it.label}</span>
+                              {it.badge === "lowStock" && <AlertChip out={stockAlert.out} total={stockAlert.total} active={active} />}
                             </Link>
                           </li>
                         );

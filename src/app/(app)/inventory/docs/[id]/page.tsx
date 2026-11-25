@@ -7,13 +7,14 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ClipboardList, FileText, ListChecks, PackageCheck, Trash2 } from "lucide-react";
+import { ClipboardList, FileText, ListChecks, PackageCheck, Pencil, Trash2 } from "lucide-react";
 import { BackPill } from "@/components/common/back-pill";
 import { DetailField, DetailHero, DetailSection, SummaryCard } from "@/components/common/detail-page";
 import { PinnedRail } from "@/components/common/pinned-rail";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ToneChip, fmtDate } from "@/components/inventory/doc-ui";
+import { StockTransferDialog } from "@/components/inventory/stock-transfer-dialog";
 import { toast } from "@/components/ui/toaster";
 import { useInventoryOps } from "@/lib/inventory-ops-context";
 import { useInventoryActions } from "@/lib/use-inventory-actions";
@@ -35,6 +36,8 @@ export default function InventoryDocPage() {
   const doc = getDoc(decodeURIComponent(id));
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [editTransfer, setEditTransfer] = useState(false);
+  const [pending, setPending] = useState<DocAction | null>(null);
   const [counts, setCounts] = useState<Record<string, string>>({});
 
   const meta = doc ? DOC_META[doc.type] : null;
@@ -113,8 +116,14 @@ export default function InventoryDocPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             {actions.map((a) => (
-              <Button key={a.to} onClick={() => act(a)} disabled={busy} variant={a.tone === "danger" ? "destructive" : a.tone === "outline" ? "outline" : "primary"}>{a.label}</Button>
+              <Button key={a.to} onClick={() => (a.effect || a.tone === "danger" ? setPending(a) : act(a))} disabled={busy} variant={a.tone === "danger" ? "destructive" : a.tone === "outline" ? "outline" : "primary"}>{a.label}</Button>
             ))}
+            {doc.type === "purchase_order" && doc.status === "draft" && allow(can, CAP.inventory.purchase) && (
+              <Button variant="outline" className="gap-2" onClick={() => router.push(`/inventory/purchase-orders/new?edit=${encodeURIComponent(doc.id)}`)}><Pencil className="h-4 w-4" />Edit PO</Button>
+            )}
+            {doc.type === "transfer" && doc.status === "requested" && allow(can, CAP.inventory.transfer) && (
+              <Button variant="outline" className="gap-2" onClick={() => setEditTransfer(true)}><Pencil className="h-4 w-4" />Edit transfer</Button>
+            )}
             {doc.type === "purchase_order" && (doc.status === "sent" || doc.status === "partial") && allow(can, CAP.inventory.purchase) && (
               <Button variant="outline" className="gap-2" onClick={createGrn} disabled={busy}><PackageCheck className="h-4 w-4" />Receive stock</Button>
             )}
@@ -155,6 +164,7 @@ export default function InventoryDocPage() {
                         {meta.hasCost && <th className={cn(TH, "w-[110px] text-right")}>Total</th>}
                         {doc.type === "vendor_return" && <th className={cn(TH, "w-[150px]")}>Reason</th>}
                         {doc.type === "transfer" && <th className={cn(TH, "w-[140px]")}>Destination</th>}
+                        {doc.type === "transfer" && <th className={cn(TH, "w-[200px]")}>Comment</th>}
                       </>
                     )}
                   </tr>
@@ -183,6 +193,7 @@ export default function InventoryDocPage() {
                             {meta.hasCost && <td className="px-3 py-2.5 text-right font-semibold tabular-nums">{formatINR((l.unitCost ?? 0) * l.qty)}</td>}
                             {doc.type === "vendor_return" && <td className="truncate px-3 py-2.5 text-muted-foreground" title={l.reason}>{l.reason || "—"}</td>}
                             {doc.type === "transfer" && <td className="truncate px-3 py-2.5 text-muted-foreground">{l.toItemId && l.toItemId !== l.itemId ? itemById(l.toItemId)?.store || l.toItemId : "Same item"}</td>}
+                            {doc.type === "transfer" && <td className="truncate px-3 py-2.5 text-muted-foreground" title={l.comment}>{l.comment || "—"}</td>}
                           </>
                         )}
                       </tr>
@@ -196,6 +207,7 @@ export default function InventoryDocPage() {
 
           <DetailSection icon={ClipboardList} title="Details" accent="neutral">
             <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
+              {doc.type === "transfer" && <DetailField label="From store" value={String(doc.data.fromStore ?? itemById(doc.lines[0]?.itemId ?? "")?.store ?? "—")} flat />}
               <DetailField label={meta.partyLabel} value={doc.party || "—"} flat />
               <DetailField label="Linked record" value={linkedRef ? <Link href={linkedRef} className="font-semibold text-[#4361EE] hover:underline">{doc.ref}</Link> : doc.ref || "—"} flat />
               {doc.type === "write_off" && <DetailField label="Location" value={String(doc.data.location ?? "—")} flat />}
@@ -236,6 +248,16 @@ export default function InventoryDocPage() {
         </PinnedRail>
       </div>
 
+      {doc.type === "transfer" && <StockTransferDialog open={editTransfer} editDoc={doc} onClose={() => setEditTransfer(false)} />}
+      <ConfirmDialog
+        open={!!pending}
+        title={pending ? `${pending.label}?` : ""}
+        description={pending ? `${doc.id} will move to “${meta.statuses[pending.to]?.label ?? pending.to}”.${pending.effect ? " This changes stock levels and is logged in the movement ledger." : ""}` : undefined}
+        confirmLabel="Confirm"
+        danger={pending?.tone === "danger"}
+        onClose={() => setPending(null)}
+        onConfirm={async () => { const a = pending; setPending(null); if (a) await act(a); }}
+      />
       <ConfirmDialog
         open={confirmDelete}
         title={`Delete ${doc.id}?`}

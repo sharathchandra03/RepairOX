@@ -82,9 +82,9 @@ export function InvKpi({
     >
       <div className="min-w-0">
         <p className="text-[12px] font-semibold text-muted-foreground">{label}</p>
-        <p className="font-display mt-1 truncate text-[1.6rem] font-extrabold leading-none tracking-tight tabular-nums">{value}</p>
+        <p className="font-display mt-1 whitespace-nowrap text-[1.6rem] font-extrabold leading-none tracking-tight tabular-nums">{value}</p>
         {hint && (
-          <p className={cn("mt-2 truncate text-[11.5px] font-medium", hintTone === "danger" ? "text-rose-600" : hintTone === "success" ? "text-emerald-600" : "text-muted-foreground")}>
+          <p className={cn("mt-2 text-[11.5px] font-medium leading-snug", hintTone === "danger" ? "text-rose-600" : hintTone === "success" ? "text-emerald-600" : "text-muted-foreground")}>
             {hint}
           </p>
         )}

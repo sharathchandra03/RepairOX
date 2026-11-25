@@ -78,7 +78,7 @@ export function useInventoryActions() {
       case "out": {
         if (!canRemove(doc.lines)) return false;
         const type: MovementType = doc.type === "transfer" ? "Transfer" : "Outward";
-        const label = doc.type === "transfer" ? `Transfer ${doc.id} → ${doc.party}` : `Vendor return ${doc.id} → ${doc.party}`;
+        const label = doc.type === "transfer" ? (doc.party || `Transfer ${doc.id}`) : `Vendor return ${doc.id} → ${doc.party}`;
         for (let i = 0; i < doc.lines.length; i++) {
           if (!(await adjust({ itemId: doc.lines[i].itemId, delta: -doc.lines[i].qty, label, type, doc: mv(i) }))) return false;
         }
@@ -87,7 +87,7 @@ export function useInventoryActions() {
       case "transfer_in": {
         for (let i = 0; i < doc.lines.length; i++) {
           const l = doc.lines[i];
-          if (!(await adjust({ itemId: l.toItemId || l.itemId, delta: l.qty, label: `Transfer ${doc.id}`, type: "Transfer", doc: `${mv(i)}-IN` }))) return false;
+          if (!(await adjust({ itemId: l.toItemId || l.itemId, delta: l.qty, label: typeof doc.data.fromStore === "string" && doc.data.fromStore ? doc.data.fromStore : `Transfer ${doc.id}`, type: "Transfer", doc: `${mv(i)}-IN` }))) return false;
         }
         return true;
       }

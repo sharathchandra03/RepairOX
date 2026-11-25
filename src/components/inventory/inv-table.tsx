@@ -44,7 +44,7 @@ export type InvColumn<T> = {
 
 export function InvTable<T>({
   columns, rows, rowKey, onRowClick, itemLabel = "item", emptyTitle = "Nothing to show", emptyHint, rowTint, resetKey,
-  selectable = false, selected, onSelectedChange, selectLabel = "Select all", flow = false,
+  selectable = false, selected, onSelectedChange, selectLabel = "Select all", flow = false, fill = false, minWidth,
 }: {
   columns: InvColumn<T>[];
   rows: T[];
@@ -64,7 +64,12 @@ export function InvTable<T>({
   /** Tickets-style layout: the PAGE scrolls (no closed box), the header sticks under the topbar,
    *  columns share the full width by their `pct`, and the pagination footer follows the last row. */
   flow?: boolean;
+  /** Locked (inner-scroll) table whose columns share the FULL width by their `pct` instead of shrink-wrapping. */
+  fill?: boolean;
+  /** Minimum table width in px for `fill` tables; narrower screens scroll sideways instead of squeezing headings. */
+  minWidth?: number;
 }) {
+  const fixed = flow || fill;
   const cols = useMemo(() => columns.filter((c) => !c.hidden), [columns]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -96,8 +101,8 @@ export function InvTable<T>({
     <>
       <div className={cn("border-zinc-300 bg-card shadow-card border-2", flow ? "" : "rox-lock-grow flex flex-col")}>
         <div className={flow ? "[overflow-x:clip]" : "rox-grid-scroll min-h-0 flex-1 overflow-auto"}>
-          <table className={cn("w-full text-[14px]", flow && "table-fixed")}>
-            {flow && (
+          <table className={cn("w-full text-[14px]", fixed && "table-fixed", fill && !minWidth && "min-w-[1040px]")} style={fill && minWidth ? { minWidth } : undefined}>
+            {fixed && (
               <colgroup>
                 {selectable && <col style={{ width: 44 }} />}
                 {cols.map((c) => <col key={c.key} style={{ width: `${((c.pct ?? 100 / cols.length) / (pctSum || 100)) * 100}%` }} />)}
@@ -111,7 +116,7 @@ export function InvTable<T>({
                   </th>
                 )}
                 {cols.map((c) => (
-                  <th key={c.key} style={flow ? undefined : sizeStyle(c)} className={cn("rox-table-cell whitespace-nowrap py-4 font-bold", align(c.align))}>{c.header}</th>
+                  <th key={c.key} style={fixed ? undefined : sizeStyle(c)} className={cn("rox-table-cell whitespace-nowrap py-4 font-bold", align(c.align))}>{c.header}</th>
                 ))}
               </RoxHeadRow>
             </RoxTableHead>
@@ -132,7 +137,7 @@ export function InvTable<T>({
                       </td>
                     )}
                     {cols.map((c) => (
-                      <RoxTableCell key={c.key} style={!flow && c.grow ? { maxWidth: 0, minWidth: c.min ?? 220 } : undefined} className={cn(align(c.align), flow ? "overflow-hidden" : c.grow ? "overflow-hidden" : "whitespace-nowrap")}>
+                      <RoxTableCell key={c.key} style={!fixed && c.grow ? { maxWidth: 0, minWidth: c.min ?? 220 } : undefined} className={cn(align(c.align), fixed ? "overflow-hidden" : c.grow ? "overflow-hidden" : "whitespace-nowrap")}>
                         {c.max ? <div className="truncate" style={{ maxWidth: c.max }}>{c.render(r)}</div> : c.render(r)}
                       </RoxTableCell>
                     ))}

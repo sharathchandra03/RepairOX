@@ -26,6 +26,13 @@ export type DocLine = {
   /** Transfer: destination item that receives the units (defaults to itemId). */
   toItemId?: string;
   reason?: string;
+  /** Transfer: per-line comment. */
+  comment?: string;
+  /** PO: line details (all optional so other workflows are unaffected). */
+  description?: string;
+  hsn?: string;
+  uom?: string;
+  taxPct?: number;
 };
 
 export type InvDoc = {
@@ -133,7 +140,7 @@ export const DOC_META: Record<DocType, DocMeta> = {
       : [],
   },
   transfer: {
-    type: "transfer", prefix: "TRF", label: "Store Transfer", plural: "Store Transfers", route: "/inventory/transfers",
+    type: "transfer", prefix: "TRF", label: "Store Transfer", plural: "Stock Transfers", route: "/inventory/stock-movement",
     partyLabel: "To store", initial: "requested", hasCost: false,
     statuses: {
       requested: { label: "Requested", tone: "warning" }, in_transit: { label: "In transit", tone: "info" },
@@ -143,7 +150,7 @@ export const DOC_META: Record<DocType, DocMeta> = {
       : s === "in_transit" ? [{ label: "Receive at destination", to: "received", effect: "transfer_in", needs: "transfer" }] : [],
   },
   stock_count: {
-    type: "stock_count", prefix: "CNT", label: "Stock Count", plural: "Stock Count (Audit)", route: "/inventory/stock-count",
+    type: "stock_count", prefix: "CNT", label: "Stock Count", plural: "Stock Audit", route: "/inventory/stock-count",
     partyLabel: "Location", initial: "draft", hasCost: false,
     statuses: {
       draft: { label: "Counting", tone: "warning" }, submitted: { label: "Awaiting approval", tone: "info" },
@@ -202,7 +209,9 @@ export function nextVendorId(existing: { id: string }[]): string {
 }
 
 export const docUnits = (d: InvDoc) => d.lines.reduce((s, l) => s + (l.qty || 0), 0);
-export const docValue = (d: InvDoc) => d.lines.reduce((s, l) => s + (l.qty || 0) * (l.unitCost || 0), 0);
+export const docValue = (d: InvDoc) =>
+  // A PO built in the full PO editor stores its grand total (tax, discount, charges included).
+  typeof d.data.grandTotal === "number" ? d.data.grandTotal : d.lines.reduce((s, l) => s + (l.qty || 0) * (l.unitCost || 0), 0);
 
 /* ── Row mappers (snake_case DB ↔ camelCase app) ────────────────────────── */
 /* eslint-disable @typescript-eslint/no-explicit-any */

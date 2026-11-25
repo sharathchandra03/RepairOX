@@ -7,14 +7,14 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Package, Plus, Trash2 } from "lucide-react";
+import { AlarmClock, FileEdit, Package, Plus, Trash2, Truck, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label, Select } from "@/components/ui/input";
 import { RoxCenteredForm } from "@/components/ui/rox-centered-form";
 import { TableSearch } from "@/components/common/table-utility-bar";
 import { InventorySearchBox } from "@/components/inventory/inventory-search-box";
 import { InvTable, type InvColumn } from "@/components/inventory/inv-table";
-import { InvPageHeader, StatusTabs, useInventoryScope } from "@/components/inventory/inv-ui";
+import { InvKpi, InvPageHeader, StatusTabs, useInventoryScope } from "@/components/inventory/inv-ui";
 import { toast } from "@/components/ui/toaster";
 import { useInventoryOps } from "@/lib/inventory-ops-context";
 import { useInventoryActions } from "@/lib/use-inventory-actions";
@@ -56,9 +56,11 @@ function canCreateType(can: ReturnType<typeof usePermissions>["can"], type: DocT
 
 /* ── List page ──────────────────────────────────────────────────────────── */
 export function DocListPage({
-  type, icon, subtitle, createLabel,
+  type, icon, subtitle, createLabel, createHref,
 }: {
   type: DocType;
+  /** Open a full-page editor instead of the quick create dialog. */
+  createHref?: string;
   icon: React.ComponentType<{ className?: string }>;
   subtitle: string;
   createLabel: string;
@@ -77,24 +79,75 @@ export function DocListPage({
     return all.filter((d) => (tab === "all" || d.status === tab) && (!q || `${d.id} ${d.party} ${d.ref} ${d.lines.map((l) => l.name).join(" ")}`.toLowerCase().includes(q)));
   }, [all, tab, query]);
 
-  const columns: InvColumn<(typeof all)[number]>[] = [
-    { key: "id", header: meta.label, render: (d) => <Link href={`/inventory/docs/${d.id}`} onClick={(e) => e.stopPropagation()} className="font-semibold text-[#4361EE] hover:underline">{d.id}</Link> },
-    { key: "date", header: "Date", render: (d) => <span className="text-muted-foreground">{fmtDate(d.createdAt)}</span> },
-    { key: "party", header: meta.partyLabel, render: (d) => <span className="block truncate" title={d.party}>{d.party || "—"}</span> },
-    { key: "items", grow: true, header: "Items", render: (d) => <span className="block truncate text-muted-foreground" title={d.lines.map((l) => l.name).join(", ")}>{d.lines.length} item{d.lines.length === 1 ? "" : "s"} · {docUnits(d)} units</span> },
-    ...(meta.hasCost ? [{ key: "value", header: "Value", align: "right" as const, render: (d: (typeof all)[number]) => <span className="font-semibold tabular-nums">{formatINR(docValue(d))}</span> }] : []),
-    { key: "by", header: "Created by", render: (d) => <span className="block truncate text-muted-foreground">{d.createdBy || "—"}</span> },
-    { key: "status", min: 150, header: "Status", render: (d) => { const s = meta.statuses[d.status]; return <ToneChip tone={s?.tone ?? "neutral"} label={s?.label ?? d.status} />; } },
+  type Doc = (typeof all)[number];
+  const isPo = type === "purchase_order";
+  const expectedOf = (d: Doc) => (typeof d.data.expectedDate === "string" ? d.data.expectedDate : "");
+  const isOpenPo = (d: Doc) => d.status === "sent" || d.status === "partial";
+  const isLate = (d: Doc) => isOpenPo(d) && !!expectedOf(d) && new Date(expectedOf(d)).getTime() < Date.now();
+  const receivedPct = (d: Doc) => {
+    const q = d.lines.reduce((n, l) => n + (l.qty || 0), 0);
+    const r = d.lines.reduce((n, l) => n + Math.min(l.received ?? 0, l.qty || 0), 0);
+    return q > 0 ? Math.round((r / q) * 100) : 0;
+  };
+  const columns: InvColumn<Doc>[] = [
+    { key: "id", pct: 9, header: meta.label, render: (d) => <Link href={`/inventory/docs/${d.id}`} onClick={(e) => e.stopPropagation()} className="font-bold text-[#4361EE] hover:underline">{d.id}</Link> },
+    { key: "date", pct: 10, header: "Date", render: (d) => <span className="text-muted-foreground">{fmtDate(d.createdAt)}</span> },
+    { key: "party", pct: 19, header: meta.partyLabel, render: (d) => (
+      <div className="flex min-w-0 items-center gap-2.5">
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[#EEF1FD] text-[11px] font-bold text-[#4361EE]">{(d.party || "?").trim().charAt(0).toUpperCase()}</span>
+        <span className="block truncate font-semibold" title={d.party}>{d.party || "—"}</span>
+      </div>
+    ) },
+    { key: "items", pct: 22, header: "Items", render: (d) => {
+      const first = d.lines[0]?.name ?? "—";
+      return (
+        <div className="min-w-0" title={d.lines.map((l) => l.name).join(", ")}>
+          <p className="truncate text-[13.5px] font-medium">{first}{d.lines.length > 1 && <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10.5px] font-semibold text-muted-foreground">+{d.lines.length - 1}</span>}</p>
+          <p className="truncate text-[11.5px] text-muted-foreground">{d.lines.length} item{d.lines.length === 1 ? "" : "s"} · {docUnits(d)} units</p>
+        </div>
+      );
+    } },
+    ...(isPo ? [
+      { key: "expected", pct: 10, header: "Expected", render: (d: Doc) => {
+        const e = expectedOf(d);
+        if (!e) return <span className="text-muted-foreground">—</span>;
+        const late = isLate(d);
+        return <span className={cn("font-medium", late ? "text-rose-600" : "text-muted-foreground")}>{fmtDate(e)}{late && <span className="block text-[10.5px] font-semibold uppercase">Overdue</span>}</span>;
+      } },
+      { key: "recv", pct: 9, header: "Received", align: "center" as const, render: (d: Doc) => {
+        const p = receivedPct(d);
+        return (
+          <div className="mx-auto flex max-w-[84px] items-center gap-2" title={`${p}% received`}>
+            <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted"><span className={cn("block h-full rounded-full", p >= 100 ? "bg-emerald-500" : "bg-[#4361EE]")} style={{ width: `${p}%` }} /></span>
+            <span className="w-8 text-right text-[11px] font-semibold tabular-nums text-muted-foreground">{p}%</span>
+          </div>
+        );
+      } },
+    ] : []),
+    ...(meta.hasCost ? [{ key: "value", pct: 10, header: "Value", align: "right" as const, render: (d: Doc) => <span className="font-bold tabular-nums">{formatINR(docValue(d))}</span> }] : []),
+    { key: "by", pct: 10, header: "Created by", render: (d) => <span className="block truncate text-muted-foreground">{d.createdBy || "—"}</span> },
+    { key: "status", pct: 11, header: "Status", align: "center", render: (d) => { const s = meta.statuses[d.status]; return <ToneChip tone={s?.tone ?? "neutral"} label={s?.label ?? d.status} />; } },
   ];
-
+  const nDraft = all.filter((d) => d.status === "draft").length;
+  const nOpen = all.filter(isOpenPo).length;
+  const nLate = all.filter(isLate).length;
+  const openValue = all.filter((d) => d.status === "draft" || isOpenPo(d)).reduce((n, d) => n + docValue(d), 0);
   return (
     <div className="rox-lock-root space-y-4">
       <InvPageHeader
         icon={icon}
         title={meta.plural}
         subtitle={subtitle}
-        actions={canCreateType(can, type) ? <Button className="gap-2" onClick={() => setOpen(true)}><Plus className="h-4 w-4" />{createLabel}</Button> : undefined}
+        actions={canCreateType(can, type) ? <Button className="gap-2" onClick={() => (createHref ? router.push(createHref) : setOpen(true))}><Plus className="h-4 w-4" />{createLabel}</Button> : undefined}
       />
+      {isPo && (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <InvKpi label="Draft orders" value={nDraft} icon={FileEdit} tone="brand" hint="Not yet sent to vendor" />
+          <InvKpi label="Awaiting delivery" value={nOpen} icon={Truck} tone="sky" hint="Sent or partially received" />
+          <InvKpi label="Overdue" value={nLate} icon={AlarmClock} tone={nLate ? "rose" : "emerald"} hint={nLate ? "Past expected date" : "Nothing late"} hintTone={nLate ? "danger" : "success"} />
+          <InvKpi label="Open order value" value={formatINR(openValue)} icon={Wallet} tone="violet" hint="Draft + awaiting delivery" />
+        </div>
+      )}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <StatusTabs
           value={tab}
@@ -107,10 +160,11 @@ export function DocListPage({
           placeholder={`Search ${meta.plural.toLowerCase()} by number, ${meta.partyLabel.toLowerCase()} or item…`}
           animatedPrefix="Search by "
           animatedWords={["document number", meta.partyLabel.toLowerCase(), "item name"]}
-          className="w-full sm:w-64"
+          className="w-full sm:w-80"
         />
       </div>
       <InvTable
+        fill
         columns={columns}
         rows={rows}
         rowKey={(d) => d.id}
