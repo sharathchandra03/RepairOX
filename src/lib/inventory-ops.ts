@@ -26,8 +26,21 @@ export type DocLine = {
   /** Transfer: destination item that receives the units (defaults to itemId). */
   toItemId?: string;
   reason?: string;
-  /** Transfer: per-line comment. */
+  /** Transfer: per-line comment. Stock audit: counter's note. */
   comment?: string;
+  /** Stock audit: who counted (name + server-stamped staff id), when, and review flags. */
+  countedBy?: string;
+  countedById?: string;
+  countedAt?: string;
+  /** Stock audit: system quantity when the audit started (`system` is refreshed when the item is counted). */
+  systemStart?: number;
+  /** Stock audit: a reviewer asked for this line to be counted again. */
+  recount?: boolean;
+  recountNote?: string;
+  /** Stock audit: scope labels cached for filtering/reports. */
+  category?: string;
+  brand?: string;
+  location?: string;
   /** PO: line details (all optional so other workflows are unaffected). */
   description?: string;
   hsn?: string;
@@ -44,7 +57,8 @@ export type InvDoc = {
   /** Linked document (GRN → PO) or ticket id. */
   ref: string;
   lines: DocLine[];
-  data: Record<string, string | number | boolean | null>;
+  /** Type-specific fields. Scalars, plus JSON arrays/objects (e.g. Loss & Damage history + photos). */
+  data: Record<string, string | number | boolean | null | object>;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -91,7 +105,8 @@ export type DocEffect =
   | "out"               // − each line qty (vendor return sent, transfer dispatched)
   | "transfer_in"       // + each line qty into the destination item
   | "count_variance"    // post (counted − system) per line
-  | "replacement_in";   // + qty back at weighted-average cost
+  | "replacement_in"    // + qty back at weighted-average cost
+  | "writeoff_out";     // − approved loss / damage quantity (cost layers depleted)
 
 export type DocAction = { label: string; to: string; effect?: DocEffect; tone?: "primary" | "danger" | "outline"; needs?: "approve" | "adjust" | "transfer" | "purchase" };
 
@@ -150,20 +165,48 @@ export const DOC_META: Record<DocType, DocMeta> = {
       : s === "in_transit" ? [{ label: "Receive at destination", to: "received", effect: "transfer_in", needs: "transfer" }] : [],
   },
   stock_count: {
-    type: "stock_count", prefix: "CNT", label: "Stock Count", plural: "Stock Audit", route: "/inventory/stock-count",
-    partyLabel: "Location", initial: "draft", hasCost: false,
+    type: "stock_count", prefix: "CNT", label: "Stock Audit", plural: "Stock Audits", route: "/inventory/stock-count",
+    partyLabel: "Scope", initial: "draft", hasCost: false,
+    // Stock moves ONLY on "approved" (effect count_variance). Workflow + keys: lib/stock-audit.ts, migration 0128.
     statuses: {
       draft: { label: "Counting", tone: "warning" }, submitted: { label: "Awaiting approval", tone: "info" },
       approved: { label: "Approved · stock corrected", tone: "success" }, rejected: { label: "Rejected", tone: "danger" },
+      cancelled: { label: "Cancelled", tone: "neutral" },
     },
-    actions: (s) => s === "draft" ? [{ label: "Submit for approval", to: "submitted", needs: "adjust" }]
-      : s === "submitted" ? [{ label: "Approve & correct stock", to: "approved", effect: "count_variance", needs: "approve" }, { label: "Reject", to: "rejected", tone: "danger", needs: "approve" }] : [],
+    actions: (s) => s === "draft" ? [{ label: "Submit for approval", to: "submitted", needs: "adjust" }, { label: "Cancel audit", to: "cancelled", tone: "danger", needs: "approve" }]
+      : s === "submitted" ? [{ label: "Approve & correct stock", to: "approved", effect: "count_variance", needs: "approve" }, { label: "Request recount", to: "draft", tone: "outline", needs: "approve" }, { label: "Reject", to: "rejected", tone: "danger", needs: "approve" }, { label: "Cancel audit", to: "cancelled", tone: "danger", needs: "approve" }] : [],
   },
   write_off: {
     type: "write_off", prefix: "WO", label: "Write-off", plural: "Write-offs", route: "/inventory/loss-damage",
-    partyLabel: "Reason", initial: "posted", hasCost: false,
-    statuses: { posted: { label: "Posted", tone: "danger" } },
-    actions: () => [],
+    partyLabel: "Reason", initial: "reported", hasCost: false,
+    // Loss & Damage workflow. Stock moves ONLY on "approved" (effect writeoff_out).
+    // "posted" = a write-off recorded before the workflow existed (already moved stock).
+    statuses: {
+      reported: { label: "Pending approval", tone: "warning" }, verified: { label: "Verified · pending approval", tone: "info" },
+      investigating: { label: "Under investigation", tone: "violet" }, quarantined: { label: "Quarantined · repairable", tone: "violet" },
+      approved: { label: "Approved · stock written off", tone: "danger" }, restored: { label: "Restored to stock", tone: "success" },
+      rejected: { label: "Rejected", tone: "neutral" }, posted: { label: "Posted", tone: "danger" },
+    },
+    actions: (s) => s === "reported" ? [
+        { label: "Verify", to: "verified", needs: "approve" },
+        { label: "Investigate", to: "investigating", tone: "outline", needs: "approve" },
+        { label: "Reject", to: "rejected", tone: "danger", needs: "approve" },
+      ]
+      : s === "investigating" ? [
+        { label: "Verify", to: "verified", needs: "approve" },
+        { label: "Reject", to: "rejected", tone: "danger", needs: "approve" },
+      ]
+      : s === "verified" ? [
+        { label: "Approve write-off", to: "approved", effect: "writeoff_out", needs: "approve" },
+        { label: "Quarantine for repair", to: "quarantined", tone: "outline", needs: "approve" },
+        { label: "Investigate", to: "investigating", tone: "outline", needs: "approve" },
+        { label: "Reject", to: "rejected", tone: "danger", needs: "approve" },
+      ]
+      : s === "quarantined" ? [
+        { label: "Write off", to: "approved", effect: "writeoff_out", needs: "approve" },
+        { label: "Repaired · usable again", to: "restored", tone: "outline", needs: "approve" },
+      ]
+      : [],
   },
   old_part: {
     type: "old_part", prefix: "OLD", label: "Old Part Return", plural: "Old Part Returns", route: "/inventory/old-parts",

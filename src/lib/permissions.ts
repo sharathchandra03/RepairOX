@@ -172,6 +172,25 @@ export type PermissionKey =
   | "manage_purchases"
   | "manage_vendors"
   | "transfer_inventory"
+  /* Loss & Damage (inventory incidents). Granular ONLY (no coarse fallback) so each step can be
+     switched off per role; seeded onto existing inventory roles by migration 0126. */
+  | "loss_damage_view"
+  | "loss_damage_reports"
+  | "loss_damage_report"
+  | "loss_damage_export"
+  | "loss_damage_verify"
+  | "loss_damage_approve"
+  | "loss_damage_reject"
+  | "stock_audit_view"
+  | "stock_audit_reports"
+  | "stock_audit_create"
+  | "stock_audit_count"
+  | "stock_audit_see_system_qty"
+  | "stock_audit_export"
+  | "stock_audit_review"
+  | "stock_audit_approve"
+  | "stock_audit_approve_high"
+  | "stock_audit_cancel"
   /* Customers */
   | "view_customers"
   | "create_customer"
@@ -647,6 +666,37 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "manage_purchases", label: "Manage Purchases" },
       { key: "manage_vendors", label: "Manage Vendors" },
       { key: "transfer_inventory", label: "Transfer Inventory" },
+    ],
+  },
+  {
+    id: "stock_audit",
+    label: "Stock Audit",
+    description: "Count physical stock, review variances and approve corrections — each step is its own switch",
+    permissions: [
+      { key: "stock_audit_view", label: "View Stock Audits" },
+      { key: "stock_audit_reports", label: "View Stock Audit Reports" },
+      { key: "stock_audit_count", label: "Enter Physical Counts" },
+      { key: "stock_audit_export", label: "Export Stock Audits" },
+      { key: "stock_audit_create", label: "Create / Start Stock Audits" },
+      { key: "stock_audit_see_system_qty", label: "See System Quantity During Blind Count" },
+      { key: "stock_audit_review", label: "Review Counts / Request Recount" },
+      { key: "stock_audit_approve", label: "Approve Stock Correction" },
+      { key: "stock_audit_approve_high", label: "Approve High-Variance Audits" },
+      { key: "stock_audit_cancel", label: "Cancel Stock Audits" },
+    ],
+  },
+  {
+    id: "loss_damage",
+    label: "Loss & Damage",
+    description: "Report, verify and approve lost or damaged stock — each step is its own switch",
+    permissions: [
+      { key: "loss_damage_view", label: "View Loss & Damage Register" },
+      { key: "loss_damage_reports", label: "View Loss & Damage Reports" },
+      { key: "loss_damage_report", label: "Report Loss / Damage" },
+      { key: "loss_damage_export", label: "Export Loss & Damage" },
+      { key: "loss_damage_verify", label: "Verify / Investigate Incidents" },
+      { key: "loss_damage_approve", label: "Approve Write-off / Quarantine" },
+      { key: "loss_damage_reject", label: "Reject Incidents" },
     ],
   },
   {
@@ -1160,7 +1210,7 @@ export const ROLES: RoleDef[] = [
       "update_payment", "mark_overdue", "share_invoice", "convert_from_ticket", "view_payment_history",
       "manage_invoices", "manage_payments", "manage_refunds", "manage_warranties",
       "view_inventory", "create_item", "edit_item", "delete_item", "adjust_stock", "stock_movement",
-      "approve_inventory", "manage_barcode", "manage_categories", "manage_brands", "manage_models", "manage_price_list",
+      "approve_inventory", "loss_damage_view", "loss_damage_reports", "loss_damage_report", "loss_damage_export", "loss_damage_verify", "loss_damage_approve", "loss_damage_reject", "stock_audit_view", "stock_audit_reports", "stock_audit_count", "stock_audit_export", "stock_audit_create", "stock_audit_see_system_qty", "stock_audit_review", "stock_audit_approve", "stock_audit_approve_high", "stock_audit_cancel", "manage_barcode", "manage_categories", "manage_brands", "manage_models", "manage_price_list",
       "manage_inventory", "manage_purchases", "manage_vendors", "transfer_inventory",
       "view_customers", "create_customer", "edit_customer", "delete_customer",
       "view_customer_history", "merge_customer", "export_customers", "manage_customers",
@@ -1204,7 +1254,7 @@ export const ROLES: RoleDef[] = [
       "update_payment", "mark_overdue", "share_invoice", "convert_from_ticket", "view_payment_history",
       "manage_invoices", "manage_payments", "manage_refunds", "manage_warranties",
       "view_inventory", "create_item", "edit_item", "delete_item", "adjust_stock", "stock_movement",
-      "approve_inventory", "manage_barcode", "manage_categories", "manage_brands", "manage_models", "manage_price_list",
+      "approve_inventory", "loss_damage_view", "loss_damage_reports", "loss_damage_report", "loss_damage_export", "loss_damage_verify", "loss_damage_approve", "loss_damage_reject", "stock_audit_view", "stock_audit_reports", "stock_audit_count", "stock_audit_export", "stock_audit_create", "stock_audit_see_system_qty", "stock_audit_review", "stock_audit_approve", "manage_barcode", "manage_categories", "manage_brands", "manage_models", "manage_price_list",
       "manage_inventory", "manage_purchases", "manage_vendors", "transfer_inventory",
       "view_customers", "create_customer", "edit_customer", "delete_customer",
       "view_customer_history", "merge_customer", "export_customers", "manage_customers",
@@ -1245,7 +1295,7 @@ export const ROLES: RoleDef[] = [
       "manage_invoices", "manage_payments", "use_pos",
       "view_customers", "create_customer", "edit_customer", "view_customer_history", "manage_customers",
       "assign_customer_groups",
-      "view_inventory",
+      "view_inventory", "loss_damage_view",
       "print_documents", "upload_files", "send_communications",
       // Reception receives store-to-store handoffs and sees field jobs.
       "view_field_jobs", "receive_store_handoff",
@@ -1262,7 +1312,7 @@ export const ROLES: RoleDef[] = [
       "view_ticket", "change_ticket_status", "update_repair_status",
       "add_parts", "view_internal_notes", "view_device_details",
       "view_warranty", "complete_warranty",
-      "view_inventory",
+      "view_inventory", "loss_damage_view", "stock_audit_view",
       "upload_files",
     ],
   },
@@ -1278,7 +1328,7 @@ export const ROLES: RoleDef[] = [
       "add_parts", "remove_parts", "view_qc", "perform_qc",
       "view_internal_notes", "view_device_details",
       "assign_technicians",
-      "view_inventory", "adjust_stock",
+      "view_inventory", "adjust_stock", "loss_damage_view", "loss_damage_report", "stock_audit_view", "stock_audit_count",
       "upload_files",
     ],
   },
@@ -1291,7 +1341,7 @@ export const ROLES: RoleDef[] = [
       "create", "edit",
       "view_dashboard", "view_kpi_cards",
       "view_inventory", "create_item", "edit_item", "delete_item", "adjust_stock", "stock_movement",
-      "approve_inventory", "manage_barcode", "manage_categories", "manage_brands", "manage_models", "manage_price_list",
+      "approve_inventory", "loss_damage_view", "loss_damage_reports", "loss_damage_report", "loss_damage_export", "loss_damage_verify", "loss_damage_approve", "loss_damage_reject", "stock_audit_view", "stock_audit_reports", "stock_audit_count", "stock_audit_export", "stock_audit_create", "stock_audit_see_system_qty", "stock_audit_review", "stock_audit_approve", "manage_barcode", "manage_categories", "manage_brands", "manage_models", "manage_price_list",
       "manage_inventory", "manage_purchases", "manage_vendors", "transfer_inventory",
       "view_device_catalog", "create_category", "edit_category", "create_brand", "edit_brand",
       "create_model", "edit_model", "upload_images", "import_csv", "export_csv", "edit_parts_pricing",
@@ -1408,7 +1458,7 @@ export const ROLES: RoleDef[] = [
     permissions: [
       "view_only",
       "view_dashboard", "view_kpi_cards", "view_charts",
-      "view_ticket", "view_invoice", "view_inventory", "view_customers",
+      "view_ticket", "view_invoice", "view_inventory", "loss_damage_view", "stock_audit_view", "view_customers",
       "view_expenses", "view_ledger", "view_employees",
       "view_financial_reports", "view_reports", "view_inventory_reports", "view_sales_reports", "view_ticket_reports",
       "view_device_catalog", "view_settings",

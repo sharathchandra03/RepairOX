@@ -19,13 +19,15 @@ import { usePermissions } from "@/lib/permissions-context";
 import { useInventoryOps } from "@/lib/inventory-ops-context";
 import { toast } from "@/components/ui/toaster";
 import { DOC_META, type DocAction, type DocLine, type InvDoc, type DocType } from "@/lib/inventory-ops";
+import { CAP, allow } from "@/lib/capabilities";
+import { canMoveTo, canReviewOwn } from "@/lib/loss-damage";
 import type { MovementType } from "@/lib/inventory-data";
 
 type Adjust = { itemId: string; delta: number; label: string; type: MovementType; unitCost?: number; doc: string };
 
 export function useInventoryActions() {
   const { inventory, addStockMovement, updateInventoryItem, noteReceiptLocally } = useStore();
-  const { currentUser, isDemoMode } = usePermissions();
+  const { currentUser, isDemoMode, can } = usePermissions();
   const ops = useInventoryOps();
   const invRef = useRef(inventory); invRef.current = inventory;
   const opsRef = useRef(ops); opsRef.current = ops;
@@ -123,6 +125,14 @@ export function useInventoryActions() {
         }
         return true;
       }
+      case "writeoff_out": {
+        if (!canRemove(doc.lines)) return false;
+        for (let i = 0; i < doc.lines.length; i++) {
+          // "Write-off: <reason>" + a WO- doc number keep the movement recognisable to the stock ledger helpers.
+          if (!(await adjust({ itemId: doc.lines[i].itemId, delta: -doc.lines[i].qty, label: `Write-off: ${doc.party || "Other"}`, type: "Adjustment", doc: mv(i) }))) return false;
+        }
+        return true;
+      }
       default:
         return true;
     }
@@ -147,17 +157,80 @@ export function useInventoryActions() {
     return (await opsRef.current.saveDoc(doc)) ? doc : null;
   }, [who]);
 
-  /** Write off damaged / lost stock: post the stock-out, then record the document. */
-  const writeOff = useCallback(async (itemId: string, qty: number, reason: string, note: string): Promise<boolean> => {
-    const item = invRef.current.find((i) => i.id === itemId);
-    if (!item) return false;
-    const id = opsRef.current.nextDocId("write_off");
-    if (!(await adjust({ itemId, delta: -qty, label: `Write-off: ${reason}`, type: "Adjustment", doc: `${id}/1` }))) return false;
-    return opsRef.current.saveDoc({
-      id, type: "write_off", status: "posted", party: reason, ref: "", lines: [{ itemId, name: item.name, qty, reason }],
-      data: { note, location: item.store }, createdBy: who, createdAt: "", updatedAt: "",
+  /** Report a loss / damage incident. No stock moves until a manager approves it. */
+  const reportIncident = useCallback(async (i: {
+    itemId: string; qty: number; kind: "loss" | "damage"; reason: string; model: string; branch: string;
+    responsible: string; note: string; photos: string[]; unitCost: number;
+  }): Promise<InvDoc | null> => {
+    if (!allow(can, CAP.lossDamage.report)) { toast.error("You don't have access to report loss or damage."); return null; }
+    const item = invRef.current.find((x) => x.id === i.itemId);
+    if (!item) return null;
+    const now = new Date().toISOString();
+    return createDoc("write_off", {
+      party: i.reason,
+      lines: [{ itemId: item.id, name: item.name, qty: i.qty, reason: i.reason }],
+      data: {
+        kind: i.kind, model: i.model, category: item.category, branch: i.branch, location: i.branch, responsible: i.responsible,
+        note: i.note, unitCost: i.unitCost, reportedQty: i.qty, reportedById: currentUser?.id ?? "",
+        photos: i.photos, // small data-URL images
+        history: [{ at: now, by: who, status: "reported", note: i.note || undefined }],
+      },
     });
-  }, [adjust, who]);
+  }, [createDoc, currentUser?.id, who, can]);
 
-  return { adjust, runAction, createDoc, writeOff, canRemove };
+  type StepOpts = { note?: string; qty?: number; unitCost?: number };
+
+  /** Build the next document for one approval step (history entry, verified quantity, cost, self-review flag). */
+  const stepDoc = useCallback((base: InvDoc, action: DocAction, opts: StepOpts, own: boolean): InvDoc => {
+    const at = new Date().toISOString();
+    const prev = Array.isArray(base.data.history) ? (base.data.history as unknown as object[]) : [];
+    const qty = opts.qty !== undefined && opts.qty > 0 ? opts.qty : base.lines[0]?.qty ?? 0;
+    const lines = base.lines.map((l, idx) => (idx === 0 ? { ...l, qty } : l));
+    return {
+      ...base, lines,
+      data: {
+        ...base.data,
+        ...(opts.unitCost !== undefined ? { unitCost: opts.unitCost } : {}),
+        ...(qty !== base.lines[0]?.qty ? { verifiedQty: qty } : {}),
+        decidedBy: who, decidedById: currentUser?.id ?? "", decidedAt: at,
+        ...(own ? { selfReviewed: true } : {}),
+        history: [...prev, { at, by: who, status: action.to, note: opts.note || undefined, ...(own ? { self: true } : {}) }],
+      },
+    };
+  }, [currentUser?.id, who]);
+
+  /** Checks shared by every step: permission, own-report rule, and "someone else already moved it". */
+  const guardStep = useCallback((doc: InvDoc, to: string): { live: InvDoc; own: boolean } | null => {
+    // Same rules as the database guard (migrations 0126/0127), checked first so stock is never posted for a move that would be refused.
+    if (!canMoveTo(can, to)) { toast.error("You don't have access to do this step."); return null; }
+    const own = !!doc.data.reportedById && doc.data.reportedById === currentUser?.id;
+    if (own && !canReviewOwn(can)) { toast.error("Another approver has to review an incident you reported."); return null; }
+    const live = opsRef.current.getDoc(doc.id);
+    if (!live || live.status !== doc.status) { toast.error(`${doc.id} was just updated by someone else. Reload and check its status.`); return null; }
+    return { live, own };
+  }, [can, currentUser?.id]);
+
+  /** Move an incident through ONE step of the approval workflow (verify / approve / reject / quarantine …). */
+  const decideIncident = useCallback(async (doc: InvDoc, action: DocAction, opts: StepOpts = {}): Promise<boolean> => {
+    const g = guardStep(doc, action.to);
+    if (!g) return false;
+    return runAction(stepDoc(g.live, action, opts, g.own), action);
+  }, [guardStep, stepDoc, runAction]);
+
+  /** Manager / owner shortcut: verify AND approve the write-off in one go (two recorded steps). */
+  const approveIncident = useCallback(async (doc: InvDoc, opts: StepOpts = {}): Promise<boolean> => {
+    const verify = DOC_META.write_off.actions(doc.status).find((a) => a.to === "verified");
+    const approve = DOC_META.write_off.actions("verified").find((a) => a.to === "approved");
+    if (!verify || !approve) { toast.error("This incident can't be approved from its current status."); return false; }
+    if (!canMoveTo(can, "verified")) { toast.error("You don't have access to verify incidents."); return false; }
+    const g = guardStep(doc, "approved");
+    if (!g) return false;
+    const verified = stepDoc(g.live, verify, opts, g.own);
+    // Nothing is written until we know the stock-out will succeed, so an incident is never left half-approved for lack of stock.
+    if (!canRemove(verified.lines)) return false;
+    if (!(await runAction(verified, verify))) return false;
+    return runAction(stepDoc({ ...verified, status: "verified" }, approve, { note: opts.note }, g.own), approve);
+  }, [can, guardStep, stepDoc, canRemove, runAction]);
+
+  return { adjust, runAction, createDoc, reportIncident, decideIncident, approveIncident, canRemove };
 }

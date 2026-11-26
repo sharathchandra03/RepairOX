@@ -14,6 +14,7 @@
     "db:inspect": "node scripts/db-inspect.mjs",
     "db:migrate": "node scripts/migrate.mjs up",
     "inventory:ops:verify": "node scripts/inventory-ops-verify.mjs",
+    "loss-damage:verify": "node scripts/loss-damage-verify.mjs",
     "seed:ops": "node scripts/seed-ops-data.mjs",
     "seed:ops:undo": "node scripts/seed-ops-data.mjs --undo",
     "db:migrate:status": "node scripts/migrate.mjs status",
@@ -33,6 +34,8 @@
     "field:ops:verify": "node scripts/field-ops-verify.mjs",
     "ninja:sales:verify": "node scripts/ninja-field-sales-verify.mjs",
     "attendance:test": "tsx --test src/lib/work-session.test.ts",
+    "stock-audit:verify": "node scripts/stock-audit-verify.mjs",
+    "stock-audit:test": "tsx --test src/lib/stock-audit.test.ts",
     "inventory:costing:test": "tsx --test src/lib/inventory-costing.test.ts",
     "inventory:costing:verify": "node scripts/inventory-costing-verify.mjs",
     "ms:migrate": "node scripts/apply-multi-store.mjs"

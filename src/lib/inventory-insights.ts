@@ -160,11 +160,13 @@ export function buildInventoryInsights(input: {
   const since = now - 90 * DAY;
   const itemById = new Map(items.map((i) => [i.id, i]));
   const lossMap = new Map<string, { reason: string; units: number; value: number; entries: number }>();
-  for (const d of docs.filter((x) => x.type === "write_off" && new Date(x.createdAt).getTime() >= since)) {
+  // Only approved (or pre-workflow "posted") write-offs have actually reduced stock.
+  for (const d of docs.filter((x) => x.type === "write_off" && (x.status === "approved" || x.status === "posted") && new Date(x.createdAt).getTime() >= since)) {
     const reason = d.party || "Other";
     const row = lossMap.get(reason) ?? { reason, units: 0, value: 0, entries: 0 };
     row.entries++;
-    for (const l of d.lines) { row.units += l.qty || 0; row.value += (l.qty || 0) * (itemById.get(l.itemId) ? valueOf(itemById.get(l.itemId)!) : 0); }
+    const recorded = typeof d.data.unitCost === "number" ? d.data.unitCost : 0;
+    for (const l of d.lines) { row.units += l.qty || 0; row.value += (l.qty || 0) * (recorded || (itemById.get(l.itemId) ? valueOf(itemById.get(l.itemId)!) : 0)); }
     lossMap.set(reason, row);
   }
   const losses = [...lossMap.values()].sort((a, b) => b.value - a.value || b.units - a.units);

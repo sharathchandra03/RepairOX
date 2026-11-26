@@ -447,6 +447,37 @@ export const CAP = {
     // Review / correct a completed or interrupted session (append-only).
     correct: ["work_sessions_correct", "manage_attendance"],
   },
+  /* Loss & Damage — GRANULAR ONLY (no coarse manage_inventory fallback) so every step can be turned
+     off per role in Roles & Permissions. Migration 0126 seeds existing inventory roles so nobody
+     loses access today. Money figures stay behind CAP.sensitive.viewCost.
+     CAP ↔ DB lockstep: the `auth_has_any` arrays in `inv_doc_allowed` and `loss_damage_guard`
+     (migration 0126) must list the same keys. */
+  lossDamage: {
+    view: ["loss_damage_view", "loss_damage_reports", "loss_damage_report", "loss_damage_verify", "loss_damage_approve", "loss_damage_reject"],
+    reports: ["loss_damage_reports"],
+    report: ["loss_damage_report"],
+    export: ["loss_damage_export"],
+    // Verify = confirm the physical count + cost. Investigate also needs it.
+    verify: ["loss_damage_verify"],
+    // Approve = write stock off, quarantine for repair, or restore a repaired part.
+    approve: ["loss_damage_approve"],
+    reject: ["loss_damage_reject"],
+  },
+  /* Stock Audit — GRANULAR ONLY (no coarse manage_inventory fallback) so counting, reviewing and approving
+     can each be switched off per role. Migration 0128 seeds existing inventory roles.
+     CAP ↔ DB lockstep: the `auth_has_any` arrays in `inv_doc_allowed` and `stock_audit_guard` (0128) list the same keys. */
+  stockAudit: {
+    view: ["stock_audit_view", "stock_audit_reports", "stock_audit_create", "stock_audit_count", "stock_audit_review", "stock_audit_approve", "stock_audit_approve_high", "stock_audit_cancel"],
+    reports: ["stock_audit_reports"],
+    create: ["stock_audit_create"],
+    count: ["stock_audit_count"],
+    seeSystemQty: ["stock_audit_see_system_qty"],
+    export: ["stock_audit_export"],
+    review: ["stock_audit_review"],
+    approve: ["stock_audit_approve", "stock_audit_approve_high"],
+    approveHigh: ["stock_audit_approve_high"],
+    cancel: ["stock_audit_cancel"],
+  },
 } satisfies Record<string, Record<string, PermissionKey[]>>;
 
 /** True when the caller's `can()` grants ANY of the keys for an action.

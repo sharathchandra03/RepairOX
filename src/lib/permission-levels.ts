@@ -259,6 +259,34 @@ export const PERMISSION_MODULES: ModuleDef[] = [
     },
   },
   {
+    // Loss & Damage is its OWN module so a store can let warehouse staff REPORT without letting
+    // them verify/approve, and split verifier from approver. Every key here is granular-only
+    // (no coarse fallback in CAP.lossDamage), so switching one off really removes that step.
+    id: "loss_damage",
+    label: "Loss & Damage",
+    blurb: "Report lost or damaged stock, then who verifies, approves or rejects it.",
+    icon: "ShieldAlert",
+    levels: {
+      view: ["loss_damage_view", "loss_damage_reports"],
+      work: ["loss_damage_report", "loss_damage_export"],
+      manage: ["loss_damage_verify", "loss_damage_approve", "loss_damage_reject"],
+    },
+  },
+  {
+    // Stock Audit is its OWN module: counting, reviewing and approving the correction are separate
+    // switches (granular-only in CAP.stockAudit). Counters can count without ever approving.
+    id: "stock_audit",
+    label: "Stock Audit",
+    blurb: "Count physical stock, review variances and approve stock corrections.",
+    icon: "ClipboardCheck",
+    levels: {
+      view: ["stock_audit_view", "stock_audit_reports"],
+      work: ["stock_audit_count", "stock_audit_export"],
+      manage: ["stock_audit_create", "stock_audit_see_system_qty", "stock_audit_review", "stock_audit_approve"],
+      full: ["stock_audit_approve_high", "stock_audit_cancel"],
+    },
+  },
+  {
     id: "catalog",
     label: "Price List & Catalog",
     blurb: "Device catalog, brands, models and pricing.",
@@ -523,7 +551,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     scope: "all_shops",
     levels: {
       dashboard: "full", tickets: "full", invoices: "full", walkin: "manage", leads: "manage",
-      field: "manage", inventory: "manage", catalog: "manage", customers: "manage", loyalty: "manage",
+      field: "manage", inventory: "manage", loss_damage: "manage", stock_audit: "full", catalog: "manage", customers: "manage", loyalty: "manage",
       employees: "manage", accounts: "manage", reports: "manage", stores: "full",
       employees_admin: "manage", settings: "full", account: "work", deals: "full",
       work_session: "full", trash: "manage", lead_reassignment: "work",
@@ -537,7 +565,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     scope: "assigned",
     levels: {
       dashboard: "manage", tickets: "manage", invoices: "manage", walkin: "manage", leads: "work",
-      field: "manage", inventory: "manage", catalog: "work", customers: "manage", loyalty: "manage",
+      field: "manage", inventory: "manage", loss_damage: "manage", stock_audit: "manage", catalog: "work", customers: "manage", loyalty: "manage",
       employees: "view", accounts: "work", reports: "manage", stores: "view",
       employees_admin: "view", settings: "view", account: "work", deals: "manage",
       work_session: "manage", lead_reassignment: "work",
@@ -551,7 +579,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     scope: "store",
     levels: {
       dashboard: "view", tickets: "work", invoices: "work", walkin: "work", leads: "none",
-      field: "view", inventory: "view", catalog: "view", customers: "work", loyalty: "view",
+      field: "view", inventory: "view", loss_damage: "view", stock_audit: "view", catalog: "view", customers: "work", loyalty: "view",
       employees: "none", accounts: "none", reports: "view", stores: "none",
       employees_admin: "none", settings: "none", account: "work", work_session: "view",
     },
@@ -564,7 +592,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     scope: "assigned",
     levels: {
       dashboard: "view", tickets: "work", invoices: "none", walkin: "none", leads: "none",
-      field: "none", inventory: "view", catalog: "view", customers: "view", loyalty: "view",
+      field: "none", inventory: "view", loss_damage: "view", stock_audit: "view", catalog: "view", customers: "view", loyalty: "view",
       employees: "none", accounts: "none", reports: "none", stores: "none",
       employees_admin: "none", settings: "none", account: "work", work_session: "view",
     },
@@ -577,7 +605,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     scope: "assigned",
     levels: {
       dashboard: "view", tickets: "manage", invoices: "view", walkin: "none", leads: "none",
-      field: "view", inventory: "work", catalog: "view", customers: "view", loyalty: "view",
+      field: "view", inventory: "work", loss_damage: "work", stock_audit: "work", catalog: "view", customers: "view", loyalty: "view",
       employees: "none", accounts: "none", reports: "view", stores: "none",
       employees_admin: "none", settings: "none", account: "work", work_session: "view",
     },
@@ -590,7 +618,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     scope: "assigned",
     levels: {
       dashboard: "view", tickets: "none", invoices: "work", walkin: "work", leads: "work",
-      field: "none", inventory: "none", catalog: "view", customers: "work", loyalty: "work",
+      field: "none", inventory: "none", loss_damage: "none", stock_audit: "none", catalog: "view", customers: "work", loyalty: "work",
       employees: "none", accounts: "none", reports: "view", stores: "none",
       employees_admin: "none", settings: "none", account: "work", deals: "work", work_session: "view",
     },
@@ -603,7 +631,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     scope: "assigned",
     levels: {
       dashboard: "view", tickets: "none", invoices: "none", walkin: "none", leads: "none",
-      field: "none", inventory: "manage", catalog: "manage", customers: "none",
+      field: "none", inventory: "manage", loss_damage: "manage", stock_audit: "manage", catalog: "manage", customers: "none",
       employees: "none", accounts: "none", reports: "view", stores: "none",
       employees_admin: "none", settings: "none", account: "work", work_session: "view",
     },
@@ -616,7 +644,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     scope: "assigned",
     levels: {
       dashboard: "view", tickets: "view", invoices: "none", walkin: "none", leads: "none",
-      field: "manage", inventory: "none", catalog: "none", customers: "view", loyalty: "view",
+      field: "manage", inventory: "none", loss_damage: "none", stock_audit: "none", catalog: "none", customers: "view", loyalty: "view",
       employees: "none", accounts: "none", reports: "view", stores: "none",
       employees_admin: "none", settings: "none", account: "work", work_session: "view",
     },
@@ -629,7 +657,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     scope: "store",
     levels: {
       dashboard: "view", tickets: "view", invoices: "manage", walkin: "none", leads: "none",
-      field: "none", inventory: "none", catalog: "none", customers: "view", loyalty: "view",
+      field: "none", inventory: "none", loss_damage: "none", stock_audit: "none", catalog: "none", customers: "view", loyalty: "view",
       employees: "none", accounts: "manage", reports: "view", stores: "none",
       employees_admin: "none", settings: "none", account: "work", work_session: "view",
     },
@@ -642,7 +670,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     scope: "store",
     levels: {
       dashboard: "view", tickets: "view", invoices: "view", walkin: "view", leads: "view",
-      field: "view", inventory: "view", catalog: "view", customers: "view", loyalty: "view",
+      field: "view", inventory: "view", loss_damage: "view", stock_audit: "view", catalog: "view", customers: "view", loyalty: "view",
       employees: "view", accounts: "view", reports: "view", stores: "none",
       employees_admin: "none", settings: "view", account: "work", work_session: "view",
     },

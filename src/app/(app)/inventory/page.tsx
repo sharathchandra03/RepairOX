@@ -18,7 +18,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Can } from "@/components/common/can";
-import { CAP } from "@/lib/capabilities";
+import { CAP, allow } from "@/lib/capabilities";
+import { usePermissions } from "@/lib/permissions-context";
 import { useStore } from "@/lib/store";
 import { useInventoryOps } from "@/lib/inventory-ops-context";
 import { cn, formatNumber } from "@/lib/utils";
@@ -39,6 +40,8 @@ const TONE_STYLE: Record<Tone, { bar: string; chip: string; Icon: typeof Info }>
 export default function StockSummaryPage() {
   const router = useRouter();
   const { invoices, stockMovements } = useStore();
+  const { can } = usePermissions();
+  const canLoss = allow(can, CAP.lossDamage.view);
   const { docs, serials, vendors } = useInventoryOps();
   const { stockItems, canViewCost } = useInventoryScope();
   const [movers, setMovers] = useState("fast");
@@ -313,7 +316,7 @@ export default function StockSummaryPage() {
         </Panel>
 
         <Panel title="Loss & Damage" action={<span className="text-[11.5px] text-muted-foreground">Last 90 days</span>}>
-          {d.losses.length === 0 ? <EmptyHint text="No write-offs in the last 90 days. 🎉" /> : (
+          {!canLoss ? <EmptyHint text="Loss & Damage is not switched on for your role." /> : d.losses.length === 0 ? <EmptyHint text="No write-offs in the last 90 days. 🎉" /> : (
             <div>
               <p className="mb-3 text-[13px]"><b className="text-[18px] font-extrabold tabular-nums">{d.lossUnits}</b> units written off{d.lossValue > 0 && <> · <b>{compactINR(d.lossValue)}</b> {valueLabel}</>}</p>
               <ul className="space-y-2.5">

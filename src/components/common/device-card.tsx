@@ -18,7 +18,7 @@ export function DeviceGlyph({ label, className = "h-4 w-4" }: { label: string; c
   return <Smartphone className={className} />;
 }
 
-export function DeviceCard({ label, issue, detail, extra = 0, hint, onOpen, title, ariaLabel = "View device details", badge, className }: {
+export function DeviceCard({ label, issue, detail, extra = 0, hint, onOpen, title, ariaLabel = "View device details", badge, className, wrap = false }: {
   label: string;
   issue?: string;
   /** Optional third line, e.g. "IMEI: 3567…" (already formatted). */
@@ -33,6 +33,8 @@ export function DeviceCard({ label, issue, detail, extra = 0, hint, onOpen, titl
   /** Small marker on the icon chip's corner (e.g. a priority dot). */
   badge?: React.ReactNode;
   className?: string;
+  /** Let the issue/second line wrap to two lines instead of truncating. */
+  wrap?: boolean;
 }) {
   const body = (
     <>
@@ -42,10 +44,10 @@ export function DeviceCard({ label, issue, detail, extra = 0, hint, onOpen, titl
       </span>
       <span className="min-w-0 flex-1 leading-snug">
         <span className="flex min-w-0 items-center gap-1.5 font-semibold text-indigo-950">
-          <span className="truncate" title={label || undefined}>{label || "—"}</span>
+          <span className={wrap ? "line-clamp-2 break-words" : "truncate"} title={label || undefined}>{label || "—"}</span>
           {extra > 0 && <span className="shrink-0 rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">+{extra} more</span>}
         </span>
-        {issue && <span className="mt-0.5 block truncate text-[12px] text-zinc-500" title={issue}>{issue}</span>}
+        {issue && <span className={cn("mt-0.5 block text-[12px] text-zinc-500", wrap ? "line-clamp-2 break-words" : "truncate")} title={issue}>{issue}</span>}
         {detail && <span className="mt-0.5 block truncate text-[11.5px] text-zinc-600">{detail}</span>}
       </span>
       {onOpen && <ChevronRight className="h-4 w-4 shrink-0 text-indigo-300 transition group-hover/device:translate-x-0.5 group-hover/device:text-[#4361EE]" />}

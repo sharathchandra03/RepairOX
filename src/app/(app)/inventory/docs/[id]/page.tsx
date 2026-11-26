@@ -4,7 +4,7 @@
    transfer, stock count, write-off, old part, warranty claim). Full page per the
    View-record standard: hero + summary cards + sections + pinned action rail. */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { ClipboardList, FileText, ListChecks, PackageCheck, Pencil, Trash2 } from "lucide-react";
@@ -44,6 +44,10 @@ export default function InventoryDocPage() {
   const [counts, setCounts] = useState<Record<string, string>>({});
 
   const meta = doc ? DOC_META[doc.type] : null;
+  // Loss & Damage incidents have their own full page (approval workflow + evidence).
+  useEffect(() => { if (doc?.type === "write_off") router.replace(`/inventory/loss-damage/${doc.id}`); }, [doc?.type, doc?.id, router]);
+  // Stock audits have their own full page (blind counting, review, approval).
+  useEffect(() => { if (doc?.type === "stock_count") router.replace(`/inventory/stock-count/${doc.id}`); }, [doc?.type, doc?.id, router]);
   const gate = (needs?: DocAction["needs"]) =>
     !needs ? true : allow(can, needs === "approve" ? CAP.inventory.approve : needs === "adjust" ? CAP.inventory.adjust : needs === "transfer" ? CAP.inventory.transfer : CAP.inventory.purchase);
   const actions = useMemo(() => (doc && meta ? meta.actions(doc.status).filter((a) => gate(a.needs)) : []), [doc, meta]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -108,7 +112,7 @@ export default function InventoryDocPage() {
     if (ok) { toast.success(`${formatINR(amt)} recorded against ${doc.id}`); setPayAmt(""); setPayNote(""); }
   }
   const itemById = (itemId: string) => inventory.find((i) => i.id === itemId);
-  const linkedRef = doc.ref && /^(PO|GRN|RMA|TRF|CNT|WO|OLD|WCL)-/.test(doc.ref) ? `/inventory/docs/${doc.ref}` : undefined;
+  const linkedRef = doc.ref && /^(PO|GRN|RMA|TRF|CNT|WO|OLD|WCL)-/.test(doc.ref) ? (doc.ref.startsWith("WO-") ? `/inventory/loss-damage/${doc.ref}` : `/inventory/docs/${doc.ref}`) : undefined;
   const notes = typeof doc.data.notes === "string" ? doc.data.notes : "";
 
   return (
