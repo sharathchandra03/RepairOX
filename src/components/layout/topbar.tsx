@@ -1,4 +1,5 @@
 "use client";
+import { useState, useEffect } from "react";
 
 import {
   HelpCircle, MoreHorizontal, ChevronDown, Menu,
@@ -10,6 +11,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Dropdown, MenuItem, MenuLabel } from "@/components/ui/dropdown";
 import { cn } from "@/lib/utils";
+import { useStoreSettings } from "@/lib/store-settings";
 import { UniversalSearch } from "@/components/layout/universal-search";
 import { LeadSearch } from "@/components/layout/lead-search";
 import { FieldSearch } from "@/components/layout/field-search";
@@ -48,6 +50,16 @@ export function Topbar({
 }) {
   const router = useRouter();
   const meta = WORKSPACE_MAP[activeWorkspace];
+  const { settings: storeSettings } = useStoreSettings();
+  // Profile chip flip: flips on hover, then alternates every 3s while hovered.
+  const [chipHover, setChipHover] = useState(false);
+  const [chipFlipped, setChipFlipped] = useState(false);
+  useEffect(() => {
+    if (!chipHover) { setChipFlipped(false); return; }
+    setChipFlipped(true);
+    const t = setInterval(() => setChipFlipped((f) => !f), 3000);
+    return () => clearInterval(t);
+  }, [chipHover]);
   const { allowedWorkspaces: allowed, role, isPreviewing, currentUser, logout } = usePermissions();
   const { status: workStatus, startBreak, endBreak, startWork, endWork } = useWorkSession();
   // Work Session is Sales-Agent-only this phase — the owner never sees the Work
@@ -226,12 +238,28 @@ export function Topbar({
           trigger={({ open, toggle }) => (
             <button
               onClick={toggle}
+              onMouseEnter={() => setChipHover(true)}
+              onMouseLeave={() => setChipHover(false)}
+              onFocus={() => setChipHover(true)}
+              onBlur={() => setChipHover(false)}
               className={cn(
                 "hidden md:flex shrink-0 items-center gap-2.5 rounded-full border pl-1 pr-3 py-1 transition",
                 isPreviewing ? "rox-chrome-keep border-amber-300 bg-amber-500 text-white" : "rox-chrome-keep border-[#6F87FF] bg-[#4361EE] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_4px_12px_-6px_rgba(15,23,55,0.5)] hover:bg-[#3A52D8]", open && "bg-[#3A52D8]"
               )}
             >
-              <span className="rounded-full ring-2 ring-white/40"><Avatar name={displayName} src={currentUser?.avatarUrl} size={30} /></span>
+              <span data-flipped={chipFlipped} className="rox-flip h-[34px] w-[34px] shrink-0 rounded-full ring-2 ring-white/40">
+                <span className="rox-flip-inner">
+                  <span className="rox-flip-face"><Avatar name={displayName} src={currentUser?.avatarUrl} size={34} /></span>
+                  <span className="rox-flip-face rox-flip-back">
+                    {storeSettings.logo ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={storeSettings.logo} alt="Store logo" className="h-full w-full object-contain p-[3px]" />
+                    ) : (
+                      <ShoppingBag className="h-4 w-4 text-[#4361EE]" />
+                    )}
+                  </span>
+                </span>
+              </span>
               <div className={cn("max-w-[110px] text-left leading-tight", activeWorkspace === "leads" && "hidden xl:block")}>
                 <p className="truncate whitespace-nowrap text-[12px] font-semibold text-white" title={displayName}>{displayName}</p>
                 <p className="truncate whitespace-nowrap text-[10px] text-white/80" title={role.label}>{role.label}</p>

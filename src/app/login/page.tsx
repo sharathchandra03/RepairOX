@@ -3,10 +3,10 @@
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-  Mail, Lock, Eye, EyeOff, ArrowRight, ShieldCheck, Cloud, Truck,
-  Users, FileText, Boxes, Phone, Sparkles,
+  Mail, Lock, Eye, EyeOff, ArrowRight, ShieldCheck, Truck,
+  Users, FileText, Boxes, Phone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
@@ -40,6 +40,16 @@ export default function LoginPage() {
   const [remember, setRemember] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const headRef = useRef<HTMLDivElement>(null);
+  const dotsRef = useRef<HTMLDivElement>(null);
+  function moveDots(e: React.MouseEvent<HTMLDivElement>) {
+    const h = headRef.current, d = dotsRef.current;
+    if (!h || !d) return;
+    const r = h.getBoundingClientRect();
+    d.style.setProperty("--mx", `${e.clientX - r.left}px`);
+    d.style.setProperty("--my", `${e.clientY - r.top}px`);
+    d.style.opacity = "1";
+  }
 
   // Friendly banner when the session tracker signed this device out because the
   // account was used on another device (single-device login). Read from the URL
@@ -89,75 +99,88 @@ export default function LoginPage() {
       <div className="relative mx-auto grid min-h-screen max-w-7xl grid-cols-1 gap-10 px-4 py-8 lg:grid-cols-2 lg:px-10 lg:py-12">
         {/* Marketing panel */}
         <motion.section
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-          className="relative hidden flex-col justify-between overflow-hidden rounded-3xl border border-border bg-card p-8 lg:flex"
+          initial={{ opacity: 0, y: 16, scale: 0.97 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+          className="hidden self-center overflow-hidden rounded-3xl border border-border bg-card shadow-[0_24px_60px_-34px_rgba(40,60,160,0.45)] lg:block"
         >
-          <div className="relative">
-            <div className="flex items-center justify-between">
-              <Logo />
-              <span className="inline-flex items-center gap-2 rounded-full border border-border bg-white/80 px-3 py-1 text-[11px] text-muted-foreground">
-                <Sparkles className="h-3 w-3 text-brand-600" /> End-to-end Solution for the Repair Industry
+          {/* brand header */}
+          <div
+            ref={headRef}
+            onMouseMove={moveDots}
+            onMouseLeave={() => { if (dotsRef.current) dotsRef.current.style.opacity = "0"; }}
+            className="relative overflow-hidden bg-[linear-gradient(135deg,#4361EE_0%,#2F45C4_100%)] px-10 pb-7 pt-10 text-white"
+          >
+            {/* dot grid revealed around the cursor (dots only, no glow) */}
+            <div
+              ref={dotsRef}
+              className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-500"
+              style={{
+                backgroundImage: "radial-gradient(rgba(255,255,255,0.85) 1.3px, transparent 1.6px)",
+                backgroundSize: "20px 20px",
+                WebkitMaskImage: "radial-gradient(170px circle at var(--mx,50%) var(--my,50%), #000 0%, transparent 100%)",
+                maskImage: "radial-gradient(170px circle at var(--mx,50%) var(--my,50%), #000 0%, transparent 100%)",
+              }}
+            />
+            <div className="relative flex items-center justify-between">
+              <Logo onDark className="gap-3 [&>span:last-child]:text-[24px] [&>span:last-child]:font-extrabold [&>span:last-child]:text-white [&>span:last-child>span]:text-white" />
+              <span className="text-[12.5px] font-semibold uppercase tracking-[0.16em] text-white/80">
+                For the repair industry
               </span>
             </div>
-
             <motion.h1
-              initial={{ opacity: 0, y: 12 }}
+              initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.15, duration: 0.6 }}
-              className="font-display mt-10 text-[44px] font-extrabold leading-[1.05] tracking-tight"
+              transition={{ delay: 0.15, duration: 0.5 }}
+              className="font-display relative mt-12 text-[40px] font-extrabold leading-[1.08] tracking-tight"
             >
-              Repair smarter.{" "}
-              <span className="brand-gradient-text">Grow faster.</span>
+              Repair smarter.
+              <br />
+              <span className="lg-shimmer-text">Grow faster.</span>
             </motion.h1>
-            <motion.p
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.3 }}
-              className="mt-4 max-w-md text-[15px] text-muted-foreground"
-            >
+            <p className="relative mt-5 max-w-lg text-[16px] leading-[1.65] text-white/80">
               Run your tickets, inventory, billing and customers from one place - designed for serious repair shops in India and beyond.
-            </motion.p>
-
-            {/* Pills */}
-            <div className="mt-6 flex flex-wrap gap-2">
-              <Pill icon={<Cloud className="h-3.5 w-3.5" />} label="01 · Cloud Based" />
-              <Pill icon={<ShieldCheck className="h-3.5 w-3.5" />} label="02 · Easy to Use" />
-              <Pill icon={<Sparkles className="h-3.5 w-3.5" />} label="03 · AI Insights" />
+            </p>
+            <div className="relative mt-10 text-center">
+              <span
+                aria-hidden
+                className="lg-wm font-display inline-block cursor-default select-none whitespace-nowrap text-[clamp(56px,6.4vw,88px)] font-extrabold leading-[0.9] tracking-tighter text-white/[0.16]"
+              >
+                RepairOX
+              </span>
             </div>
+          </div>
 
-            {/* Feature grid */}
-            <div className="mt-8 grid grid-cols-2 gap-3">
+          {/* body */}
+          <div className="space-y-4 px-8 pb-7 pt-7">
+            <div className="grid grid-cols-2 gap-4">
               {FEATURES.map((f, i) => (
                 <motion.div
                   key={f.title}
-                  initial={{ opacity: 0, y: 10 }}
+                  initial={{ opacity: 0, y: 18 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.4 + i * 0.06 }}
-                  className="group flex items-start gap-3 rounded-2xl border border-border bg-white p-4 transition hover:-translate-y-0.5 hover:shadow-card hover:border-[#B3BFF6]/60"
+                  transition={{ delay: 0.45 + i * 0.09, duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+                  className="lg-sweep group flex cursor-default items-start gap-3.5 rounded-2xl border border-border bg-white p-4 transition duration-200 hover:-translate-y-1 hover:border-[#4361EE]/50 hover:shadow-[0_14px_30px_-16px_rgba(67,97,238,0.55)]"
                 >
-                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-700 ring-1 ring-brand-200">
-                    <f.icon className="h-4 w-4" />
-                  </div>
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-700 ring-1 ring-brand-200 transition duration-200 group-hover:rotate-[-6deg] group-hover:scale-110 group-hover:bg-[#4361EE] group-hover:text-white group-hover:ring-[#4361EE]">
+                    <f.icon className="h-[18px] w-[18px]" />
+                  </span>
                   <div>
-                    <p className="text-sm font-semibold">{f.title}</p>
-                    <p className="text-[12px] leading-snug text-muted-foreground">{f.desc}</p>
+                    <p className="text-[13.5px] font-semibold leading-tight transition-colors group-hover:text-[#4361EE]">{f.title}</p>
+                    <p className="mt-1 text-[12px] leading-snug text-muted-foreground">{f.desc}</p>
                   </div>
                 </motion.div>
               ))}
             </div>
-          </div>
 
-          {/* Footer */}
-          <div className="relative mt-8 flex items-center justify-between rounded-2xl border border-[#D9DFFA] bg-[#EEF1FD] p-4">
-            <div className="flex items-center gap-3">
-              <span className="grid h-9 w-9 place-items-center rounded-xl brand-gradient text-white">
-                <Phone className="h-4 w-4" />
+            <div className="group flex cursor-default items-center gap-3.5 rounded-2xl bg-[#EEF1FD] px-5 py-3.5 transition duration-200 hover:-translate-y-0.5 hover:bg-[#E2E8FD] hover:shadow-[0_12px_26px_-16px_rgba(67,97,238,0.6)]">
+              <span className="relative grid h-10 w-10 place-items-center rounded-xl bg-[#4361EE] text-white transition duration-200 group-hover:scale-105 group-hover:shadow-lg group-hover:shadow-[#4361EE]/40">
+                <span className="lg-ping pointer-events-none absolute inset-0 rounded-xl bg-[#4361EE]" />
+                <Phone className="lg-phone relative h-4 w-4" />
               </span>
               <div>
-                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">For more info</p>
-                <p className="text-sm font-semibold">Call us · +91 7996611169</p>
+                <p className="text-[10.5px] uppercase tracking-wide text-muted-foreground">For more info</p>
+                <p className="text-[14px] font-semibold">Call us · +91 7996611169</p>
               </div>
             </div>
           </div>
@@ -265,14 +288,6 @@ export default function LoginPage() {
   );
 }
 
-function Pill({ icon, label }: { icon: React.ReactNode; label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white/80 px-3 py-1 text-[11px] font-medium text-zinc-700 shadow-ring">
-      <span className="text-brand-600">{icon}</span>
-      {label}
-    </span>
-  );
-}
 function GoogleG() {
   return (
     <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" aria-hidden>

@@ -1820,3 +1820,45 @@ html :where(input, textarea):where(:placeholder-shown) {
   color: hsl(var(--foreground));
   font-weight: 500;
 }
+
+/* Profile chip: avatar flips to reveal the store logo on hover / focus. */
+.rox-flip { perspective: 600px; display: block; position: relative; }
+.rox-flip-inner { display: block; position: relative; width: 100%; height: 100%; transform-style: preserve-3d; transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1); }
+.rox-flip-face { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; border-radius: 9999px; overflow: hidden; display: grid; place-items: center; }
+.rox-flip-back { transform: rotateY(180deg); background: #fff; }
+.rox-flip[data-flipped="true"] .rox-flip-inner { transform: rotateY(180deg); }
+@media (prefers-reduced-motion: reduce) { .rox-flip-inner { transition: none; } }
+
+/* ── Login showcase panel effects (subtle, motion-safe) ── */
+@keyframes lg-drift-a { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-40px,30px) scale(1.15); } }
+@keyframes lg-drift-b { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(50px,-26px) scale(1.1); } }
+@keyframes lg-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+@keyframes lg-sheen { 0% { transform: translateX(-130%) skewX(-18deg); } 100% { transform: translateX(330%) skewX(-18deg); } }
+@keyframes lg-ring { 0% { transform: scale(1); opacity: .55; } 80%,100% { transform: scale(1.9); opacity: 0; } }
+@keyframes lg-ring-ph { 0%,88%,100% { transform: rotate(0); } 91% { transform: rotate(-14deg); } 94% { transform: rotate(12deg); } 97% { transform: rotate(-8deg); } }
+.lg-drift-a { animation: lg-drift-a 14s ease-in-out infinite; }
+.lg-drift-b { animation: lg-drift-b 18s ease-in-out infinite; }
+.lg-shimmer-text {
+  background: linear-gradient(100deg, #D5DCFF 35%, #ffffff 50%, #D5DCFF 65%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: lg-shimmer 6s linear infinite;
+}
+.lg-sweep { position: relative; overflow: hidden; }
+.lg-sweep::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 38%;
+  background: linear-gradient(90deg, transparent, rgba(67,97,238,.14), transparent);
+  transform: translateX(-130%) skewX(-18deg); pointer-events: none;
+}
+.lg-sweep:hover::after { animation: lg-sheen .9s ease-out; }
+.lg-ping { animation: lg-ring 2.4s ease-out infinite; }
+.lg-phone { animation: lg-ring-ph 5s ease-in-out infinite; transform-origin: 50% 50%; }
+.lg-wm { transition: color .45s ease, text-shadow .45s ease; }
+.lg-wm:hover {
+  color: #ffffff;
+  text-shadow: 0 0 14px rgba(255,255,255,.28), 0 0 38px rgba(190,205,255,.22);
+}
+@media (prefers-reduced-motion: reduce) {
+  .lg-drift-a, .lg-drift-b, .lg-ping, .lg-phone, .lg-shimmer-text, .lg-sweep:hover::after { animation: none; }
+  .lg-shimmer-text { color: #D5DCFF; background: none; -webkit-text-fill-color: #D5DCFF; }
+}
