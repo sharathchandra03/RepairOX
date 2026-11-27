@@ -1,4 +1,8 @@
 "use client";
+import { IssueSelector } from "@/components/common/issue-selector";
+import { RSelect } from "@/components/ui/rselect";
+import { AddCategoryDialog } from "@/components/wizard/category-wheel";
+import { useTicketFieldOptions } from "@/lib/ticket-field-options";
 import { genInvoiceId } from "@/lib/invoice-id";
 
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, Suspense } from "react";
@@ -1764,11 +1768,15 @@ function LineItemNameInput({
 /* ─── Step 3: Devices & Products (Multi-Device) ──────────────────────── */
 
 function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceFormData; updateForm: (fn: (f: InvoiceFormData) => InvoiceFormData) => void; showErrors?: boolean }) {
+  const { optionsFor: jobTypeOptionsFor } = useTicketFieldOptions();
   const { can } = usePermissions();
   const { inventory, inventoryStockLayers } = useStore();
   const activeIdx = form.activeDeviceIndex;
   const activeDevice = form.devices[activeIdx] || form.devices[0];
 
+  // "+ Add Category" from the Category dropdown (same dialog as the ticket wheel).
+  const canAddCategory = allow(can, CAP.settings.deviceCategoryCreate);
+  const [addCategoryOpen, setAddCategoryOpen] = useState(false);
   // Category options — reuse the same Settings-backed master used everywhere.
   const [categoryOptions, setCategoryOptions] = useState<{ id: string; label: string }[]>(
     () => getCachedCategories()?.map((c) => ({ id: c.id, label: c.label })) ?? []
@@ -2066,16 +2074,32 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
         <div className="px-6 pt-3 pb-3 sm:px-8 space-y-2.5">
           {/* Device Details */}
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Device Details</p>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-foreground mb-1.5">Device & Job Details</p>
             <div className="grid grid-cols-1 gap-x-3 gap-y-2 md:grid-cols-3">
               <div className="space-y-1">
                 <Label>Category</Label>
-                <Select
+                <RSelect
                   value={activeDevice.category || ""}
-                  onChange={(e: any) => setDeviceField("category", e.target.value)}
-                  options={[{ label: "Select category…", value: "" }, ...categoryOptions.map((c) => ({ label: c.label, value: c.id }))]}
+                  onChange={(v) => setDeviceField("category", v)}
+                  placeholder="Select category…"
+                  searchable
+                  addLabel="Add Category"
+                  alwaysShowAddNew={canAddCategory}
+                  onAddNew={canAddCategory ? () => setAddCategoryOpen(true) : undefined}
+                  options={categoryOptions.map((c) => ({ label: c.label, value: c.id }))}
                   className="h-9"
                 />
+                {canAddCategory && (
+                  <AddCategoryDialog
+                    open={addCategoryOpen}
+                    onClose={() => setAddCategoryOpen(false)}
+                    onCreated={(item, all) => {
+                      setCategoryOptions(all.map((c) => ({ id: c.id, label: c.label })));
+                      setDeviceField("category", item.id);
+                      setAddCategoryOpen(false);
+                    }}
+                  />
+                )}
               </div>
               <DeviceBrandModelSelector
                 brand={activeDevice.brand}
@@ -2179,22 +2203,26 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
                   data + persistence; only its placement changed. */}
               <div className="space-y-1">
                 <Label>Notes</Label>
-                <Input value={activeDevice.notes} onChange={(e: any) => setDeviceField("notes", e.target.value)} placeholder="Optional notes" className="h-9" />
+                <Input value={activeDevice.notes} onChange={(e: any) => setDeviceField("notes", e.target.value)} placeholder="Optional notes" className="h-9 border-zinc-900 bg-[#FFFDE7] hover:border-black focus:border-black focus:ring-black/10" />
               </div>
-            </div>
-          </div>
-
-          {/* Job Details — Priority removed (no invoice/pricing meaning; it stays
-              a Ticket concept). */}
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Job Details</p>
-            <div className="grid grid-cols-1 gap-x-3 gap-y-2 md:grid-cols-3">
-              <div className="space-y-1"><Label>Issue</Label><Input value={activeDevice.issue} onChange={(e: any) => setDeviceField("issue", e.target.value)} placeholder="Display replacement" className="h-9" /></div>
+              <div className="space-y-1">
+                <Label>Issue</Label>
+                {/* Same multi-select issue picker as the ticket form (search,
+                    pick several, "+ Create" new) — compact so it sits in the
+                    h-9 row and grows only when pills wrap. */}
+                <IssueSelector
+                  value={activeDevice.issue}
+                  onChange={(v) => setDeviceField("issue", v)}
+                  animatedPlaceholder
+                  fieldClassName="min-h-9 max-h-none overflow-visible gap-1 px-2 py-[5px] rounded-xl border-zinc-900 bg-[#FFF4F5] hover:border-black focus-within:border-black focus-within:ring-black/10"
+                  pillClassName="gap-1 bg-rose-100 px-2 py-0 text-[12px] leading-[22px] text-rose-700 ring-rose-300/70"
+                  pillRemoveClassName="hover:bg-rose-600/15"
+                  inputClassName="h-[22px] leading-[22px] text-[13px]"
+                />
+              </div>
               <div className="space-y-1">
                 <Label>Job Type</Label>
-                <Select value={activeDevice.jobType} onChange={(e: any) => setDeviceField("jobType", e.target.value)} className="h-9" options={[
-                  { label: "Service", value: "service" }, { label: "Accessories", value: "accessories" }, { label: "Warranty", value: "warranty" }, { label: "Estimate", value: "estimate" }, { label: "Buyback", value: "buyback" },
-                ]} />
+                <Select value={activeDevice.jobType} onChange={(e: any) => setDeviceField("jobType", e.target.value)} className="h-9" options={jobTypeOptionsFor("job_type", activeDevice.jobType)} />
               </div>
               {/* Technician is NOT entered here — it's internal attribution,
                   carried from the ticket and editable later in View Invoice
@@ -2308,11 +2336,11 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
                 // buttons here; the prompt is a one-click way to open search.
                 // "Add Row" (a manual free-text line) lives INSIDE this box so
                 // it reads as part of the line-item workspace, not a header tool.
-                <div className="rounded-xl border border-dashed border-[#4361EE]/30 bg-card/60 p-3">
+                <div className="grid grid-cols-1 divide-dashed divide-[#4361EE]/20 rounded-xl border border-dashed border-[#4361EE]/30 bg-card/60 sm:grid-cols-2 sm:divide-x">
                   <button
                     type="button"
                     onClick={() => setShowInventorySearch(true)}
-                    className="flex w-full items-center justify-center gap-2.5 rounded-lg px-4 py-4 text-center transition hover:bg-[#EEF1FD]/40"
+                    className="flex w-full items-center justify-center gap-2.5 rounded-l-xl px-4 py-3 text-center transition hover:bg-[#EEF1FD]/40"
                   >
                     <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]">
                       <Search className="h-4 w-4" />
@@ -2322,24 +2350,28 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
                       <span className="block text-[11px] text-muted-foreground">Click to search the inventory and add an item.</span>
                     </span>
                   </button>
-                  <div className="mt-2 flex justify-center border-t border-dashed border-[#4361EE]/20 pt-2.5">
-                    <Button size="sm" variant="ghost" onClick={addService} className="text-[#4361EE] hover:bg-[#EEF1FD]/60">
-                      <Plus className="h-3.5 w-3.5" /> Add Row
-                    </Button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={addService}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-r-xl px-4 py-3 text-[13px] font-medium text-[#4361EE] transition hover:bg-[#EEF1FD]/60"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Add Row
+                  </button>
                 </div>
               ) : (
-                <div className="overflow-hidden rounded-xl border-2 border-zinc-300 bg-card">
+                <div className="overflow-hidden rounded-xl border border-[#4361EE]/25 bg-card shadow-[0_6px_20px_-14px_rgba(67,97,238,0.45)]">
                   {/* Table header */}
-                  <div className="hidden grid-cols-[1fr_80px_110px_110px_44px] gap-2 border-b border-zinc-300 bg-muted/60 px-3 py-2 sm:grid">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Item</span>
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Qty</span>
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Price</span>
-                    <span className="text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Total</span>
+                  <div className="hidden grid-cols-[28px_1fr_80px_110px_110px_44px] gap-2 border-b border-[#4361EE]/15 bg-[#EEF1FD] px-3 py-2 sm:grid">
+                    <span />
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-[#4361EE]">Item</span>
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-[#4361EE]">Qty</span>
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-[#4361EE]">Price</span>
+                    <span className="text-right text-[10px] font-semibold uppercase tracking-wider text-[#4361EE]">Total</span>
                     <span />
                   </div>
-                  {activeDevice.parts.map((item) => (
-                    <div key={item.id} className="grid grid-cols-1 gap-2 border-t border-zinc-300 px-3 py-2.5 first:border-t-0 sm:grid-cols-[1fr_80px_110px_110px_44px] sm:items-center sm:gap-2">
+                  {activeDevice.parts.map((item, idx) => (
+                    <div key={item.id} className="group grid grid-cols-1 gap-2 border-t border-[#4361EE]/10 px-3 py-3 transition first:border-t-0 hover:bg-[#F6F8FF] sm:grid-cols-[28px_1fr_80px_110px_110px_44px] sm:items-center sm:gap-2">
+                      <span className="hidden h-6 w-6 place-items-center rounded-md bg-[#EEF1FD] text-[10px] font-bold text-[#4361EE] sm:grid">{idx + 1}</span>
                       <div className="space-y-1 sm:space-y-0">
                         <Label className="sm:hidden">Item</Label>
                         <LineItemNameInput
@@ -2360,19 +2392,23 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
                       </div>
                       <div className="space-y-1 sm:space-y-0">
                         <Label className="sm:hidden">Total</Label>
-                        <div className="flex h-9 items-center justify-end rounded-xl border border-border bg-muted/40 px-3 text-sm font-semibold tabular-nums sm:border-0 sm:bg-transparent sm:px-0">{formatINR(item.total)}</div>
+                        <div className="flex h-9 items-center justify-end rounded-xl border border-[#4361EE]/20 bg-[#EEF1FD]/60 px-3 text-sm font-bold tabular-nums text-[#3347D6] sm:border-0 sm:bg-transparent sm:px-0">{formatINR(item.total)}</div>
                       </div>
                       <div className="flex items-center justify-end">
-                        <button onClick={() => removePart(item.id)} className="grid h-9 w-9 place-items-center rounded-lg text-rose-500 transition hover:bg-rose-50" aria-label="Remove line item"><Trash2 className="h-3.5 w-3.5" /></button>
+                        <button onClick={() => removePart(item.id)} className="grid h-9 w-9 place-items-center rounded-lg text-rose-400 transition hover:bg-rose-50 hover:text-rose-600" aria-label="Remove line item"><Trash2 className="h-3.5 w-3.5" /></button>
                       </div>
                     </div>
                   ))}
                   {/* Add Row (a manual free-text line) lives INSIDE the line-item
                       box as a footer action, so it reads as part of the workspace. */}
-                  <div className="border-t border-zinc-300 px-3 py-2">
-                    <Button size="sm" variant="ghost" onClick={addService} className="text-[#4361EE] hover:bg-[#EEF1FD]/60">
+                  <div className="border-t border-[#4361EE]/15 bg-[#F6F8FF] p-2">
+                    <button
+                      type="button"
+                      onClick={addService}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-[#4361EE]/35 py-2 text-[13px] font-medium text-[#4361EE] transition hover:bg-[#EEF1FD]"
+                    >
                       <Plus className="h-3.5 w-3.5" /> Add Row
-                    </Button>
+                    </button>
                   </div>
                 </div>
               )}

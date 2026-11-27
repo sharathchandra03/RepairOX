@@ -29,6 +29,16 @@ import {
   type DeviceModel,
 } from "@/lib/brand-model-data";
 
+/** Unscoped pickers: one row per brand name (brands are stored per category). */
+function uniqueBrandsByName(list: Brand[]): Brand[] {
+  const seen = new Set<string>();
+  return list.filter((b) => {
+    const k = b.name.trim().toLowerCase();
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
 /* ─── Props ──────────────────────────────────────────────────────────── */
 
 export interface DeviceBrandModelSelectorProps {
@@ -88,8 +98,11 @@ export function DeviceBrandModelSelector({
     setModelQuery(model || "");
   }, [model]);
 
-  // Whether category scoping is active for this instance.
-  const scoped = !!categoryId;
+  // Category scoping is active whenever the caller passes `categoryId` — even
+  // an EMPTY one (no category picked yet). Brands are stored per category
+  // (Apple exists under iPhone, iPad, MacBook…), so an unscoped list would show
+  // the same brand several times. Empty category ⇒ brand disabled until chosen.
+  const scoped = categoryId !== undefined;
 
   // Resolve selected brand: prefer the durable brandId (resolves historical
   // records by id even if archived). Otherwise resolve STRICTLY within the
@@ -110,7 +123,7 @@ export function DeviceBrandModelSelector({
   // Search results — category-scoped when a category is provided.
   const brandResults = scoped
     ? searchBrandsInCategory(brands, categoryId, brandQuery)
-    : searchBrands(brands, brandQuery);
+    : uniqueBrandsByName(searchBrands(brands.filter((b) => !b.archived), brandQuery));
   const modelResults = selectedBrand
     ? modelQuery.trim()
       ? searchModels(deviceModels, selectedBrand.id, modelQuery)

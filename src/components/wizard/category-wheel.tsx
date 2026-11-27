@@ -1,14 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Smartphone, Laptop, Tablet, Watch, Monitor, MonitorSmartphone, Boxes,
-  ChevronLeft, ChevronRight, ArrowRight,
+  ChevronLeft, ChevronRight, ArrowRight, Plus, Upload, Loader2, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input, Label } from "@/components/ui/input";
+import { RoxCenteredForm } from "@/components/ui/rox-centered-form";
 import { cn } from "@/lib/utils";
-import { loadDeviceCategories, getCachedCategories, DEFAULT_CATEGORIES, type DeviceCategoryItem } from "@/lib/device-categories";
+import { usePermissions } from "@/lib/permissions-context";
+import { allow, CAP } from "@/lib/capabilities";
+import { uploadCatalogImage } from "@/components/settings/catalog/upload-image";
+import {
+  loadDeviceCategories, getCachedCategories, saveDeviceCategories, invalidateCategoryCache,
+  DEFAULT_CATEGORIES, type DeviceCategoryItem,
+} from "@/lib/device-categories";
 
 type Cat = {
   id: string;
@@ -78,9 +86,18 @@ export function CategoryWheel({
     });
   }, [loaded]);
 
+  // Inline "+ Add category" tile (last slot of the wheel). Saves through the
+  // SAME data layer as Settings → Device Categories, so both stay in sync.
+  const { can } = usePermissions();
+  const canAdd = allow(can, CAP.settings.deviceCategoryCreate);
+  const [addOpen, setAddOpen] = useState(false);
+
   const initial = value ? CATS.findIndex((c) => c.id === value) : Math.min(3, CATS.length - 1);
   const [active, setActive] = useState(initial >= 0 ? initial : 0);
   const cur = CATS[active] || CATS[0];
+  // Wheel slots = categories + (optional) the Add tile at the very end.
+  const slotCount = CATS.length + (canAdd ? 1 : 0);
+  const addIndex = canAdd ? CATS.length : -1;
 
   // Re-sync active index when CATS load from DB and value is set.
   useEffect(() => {
@@ -92,6 +109,7 @@ export function CategoryWheel({
 
   // Sync external value if it changes (e.g. via dot navigation upstream)
   useEffect(() => {
+    if (active >= CATS.length) return; // resting on the Add tile — keep the last real selection
     onChange(cur.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
@@ -100,12 +118,27 @@ export function CategoryWheel({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "ArrowLeft") setActive((a) => Math.max(0, a - 1));
-      if (e.key === "ArrowRight") setActive((a) => Math.min(CATS.length - 1, a + 1));
-      if (e.key === "Enter") onNext();
+      if (addOpen) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (e.key === "ArrowLeft") setActive((a) => Math.max(0, a - 1));
+      if (e.key === "ArrowRight") setActive((a) => Math.min(slotCount - 1, a + 1));
+      if (e.key === "Enter") {
+        if (active === addIndex) setAddOpen(true);
+        else onNext();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onNext]);
+  }, [onNext, slotCount, addOpen, active, addIndex]);
+
+  const handleCreated = (item: DeviceCategoryItem, all: DeviceCategoryItem[]) => {
+    const next = toCats(all);
+    setCats(next);
+    const idx = next.findIndex((c) => c.id === item.id);
+    if (idx >= 0) setActive(idx);
+    setAddOpen(false);
+  };
 
   const pos = (i: number) => {
     const dist = i - active;
@@ -128,7 +161,8 @@ export function CategoryWheel({
   };
 
   const goPrev = () => setActive((a) => Math.max(0, a - 1));
-  const goFwd = () => setActive((a) => Math.min(CATS.length - 1, a + 1));
+  const goFwd = () => setActive((a) => Math.min(slotCount - 1, a + 1));
+  const onAddTile = active === addIndex;
 
   return (
     <div className="relative">
@@ -214,6 +248,36 @@ export function CategoryWheel({
                   </motion.button>
                 );
               })}
+              {canAdd && (() => {
+                const i = addIndex;
+                const p = pos(i);
+                const isActive = i === active;
+                return (
+                  <motion.button
+                    key="__add_category"
+                    type="button"
+                    onClick={() => (isActive ? setAddOpen(true) : setActive(i))}
+                    animate={{ x: p.x, y: p.y, scale: p.scale, opacity: p.opacity, filter: `blur(${p.blur}px)` }}
+                    transition={{ type: "spring", stiffness: 220, damping: 26 }}
+                    style={{ zIndex: 50 - Math.abs(i - active) }}
+                    className="group absolute flex flex-col items-center gap-3 outline-none"
+                    aria-label="Add category"
+                  >
+                    <div
+                      className={cn(
+                        "grid h-24 w-24 place-items-center rounded-[20px] border-2 border-dashed bg-white transition",
+                        isActive ? "border-[#4361EE] bg-[#EEF1FD] text-[#4361EE]" : "border-zinc-300 text-zinc-400 group-hover:border-[#4361EE]/60 group-hover:text-[#4361EE]"
+                      )}
+                      style={{ boxShadow: isActive ? "0 24px 60px -12px rgba(67,97,238,0.45)" : undefined }}
+                    >
+                      <Plus className="h-10 w-10" strokeWidth={1.8} />
+                    </div>
+                    <span className={cn("whitespace-nowrap text-sm font-semibold tracking-tight", isActive ? "text-[#4361EE]" : "text-zinc-700")}>
+                      Add Category
+                    </span>
+                  </motion.button>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -229,7 +293,7 @@ export function CategoryWheel({
         </button>
         <button
           onClick={goFwd}
-          disabled={active === CATS.length - 1}
+          disabled={active === slotCount - 1}
           aria-label="Next"
           className="absolute right-3 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full bg-[linear-gradient(180deg,#4361EE_0%,#3B54E8_100%)] text-white shadow-[0_8px_24px_-10px_rgba(67,97,238,0.55)] border border-black backdrop-blur transition hover:brightness-105 disabled:opacity-40"
         >
@@ -241,21 +305,21 @@ export function CategoryWheel({
       <div className="mt-2 text-center h-9 flex items-center justify-center overflow-hidden">
         <AnimatePresence mode="popLayout">
           <motion.p
-            key={cur.id}
+            key={onAddTile ? "__add" : cur.id}
             initial={{ opacity: 0, filter: "blur(4px)", y: 12 }}
             animate={{ opacity: 1, filter: "blur(0px)", y: 0 }}
             exit={{ opacity: 0, filter: "blur(4px)", y: -12 }}
             transition={{ duration: 0.3, ease: "easeOut" }}
             className="font-display text-2xl font-extrabold tracking-tight brand-gradient-text"
           >
-            {cur.label}
+            {onAddTile ? "Add a new category" : cur.label}
           </motion.p>
         </AnimatePresence>
       </div>
 
       {/* ---------- Dots ---------- */}
       <div className="mt-2 flex items-center justify-center gap-1.5">
-        {CATS.map((_, i) => (
+        {Array.from({ length: slotCount }).map((_, i) => (
           <button
             key={i}
             onClick={() => setActive(i)}
@@ -274,11 +338,135 @@ export function CategoryWheel({
           <Button variant="outline" size="lg" onClick={goPrev} disabled={active === 0}>
             <ChevronLeft className="h-4 w-4" /> Previous
           </Button>
-          <Button size="lg" onClick={onNext} className="min-w-[140px]">
-            Next <ArrowRight className="h-4 w-4" />
-          </Button>
+          {onAddTile ? (
+            <Button size="lg" onClick={() => setAddOpen(true)} className="min-w-[140px]">
+              <Plus className="h-4 w-4" /> Add Category
+            </Button>
+          ) : (
+            <Button size="lg" onClick={onNext} className="min-w-[140px]">
+              Next <ArrowRight className="h-4 w-4" />
+            </Button>
+          )}
         </div>
       )}
+
+      {canAdd && (
+        <AddCategoryDialog open={addOpen} onClose={() => setAddOpen(false)} onCreated={handleCreated} />
+      )}
     </div>
+  );
+}
+
+/* ─── Inline Add Category dialog (shared: wheel, ticket + invoice forms) ─── */
+export function AddCategoryDialog({
+  open,
+  onClose,
+  onCreated,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onCreated: (item: DeviceCategoryItem, all: DeviceCategoryItem[]) => void;
+}) {
+  const [name, setName] = useState("");
+  const [image, setImage] = useState<string | undefined>();
+  const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) { setName(""); setImage(undefined); setError(""); setSaving(false); }
+  }, [open]);
+
+  const onFile = async (file?: File) => {
+    if (!file) return;
+    setUploading(true);
+    const url = await uploadCatalogImage(file, "categories");
+    setUploading(false);
+    if (!url) { setError("Image upload failed. Try another image."); return; }
+    setError("");
+    setImage(url);
+  };
+
+  const save = async () => {
+    const label = name.trim();
+    if (!label || saving) return;
+    setSaving(true);
+    setError("");
+    // Re-read the latest list so we never overwrite changes made elsewhere.
+    invalidateCategoryCache();
+    const current = await loadDeviceCategories();
+    const id = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || `cat-${Date.now()}`;
+    if (current.some((c) => c.id === id || c.label.trim().toLowerCase() === label.toLowerCase())) {
+      setError(`"${label}" already exists.`);
+      setSaving(false);
+      return;
+    }
+    const item: DeviceCategoryItem = { id, label, image };
+    const all = [...current, item];
+    const ok = await saveDeviceCategories(all);
+    setSaving(false);
+    if (!ok) { setError("Couldn't save the category. Please try again."); return; }
+    // Warm the cache so other screens see it straight away.
+    const fresh = await loadDeviceCategories();
+    onCreated(item, fresh.some((c) => c.id === id) ? fresh : all);
+  };
+
+  return (
+    <RoxCenteredForm
+      open={open}
+      onClose={onClose}
+      title="Add Category"
+      subtitle="Saved to your device categories, same as Settings."
+      icon={Plus}
+      width="max-w-md"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+          <Button size="sm" disabled={!name.trim() || saving || uploading} onClick={save}>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Save Category
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        <div className="space-y-1.5">
+          <Label>Category Name</Label>
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); save(); } }}
+            placeholder="e.g. Gaming Console"
+            autoFocus
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Image (optional)</Label>
+          <div className="flex items-center gap-3">
+            <div className="relative grid h-20 w-20 place-items-center overflow-hidden rounded-[16px] border border-input bg-muted/30">
+              {uploading ? (
+                <Loader2 className="h-5 w-5 animate-spin text-[#4361EE]" />
+              ) : image ? (
+                <img src={image} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <Boxes className="h-8 w-8 text-zinc-400" />
+              )}
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()} disabled={uploading}>
+                <Upload className="h-3.5 w-3.5" /> {image ? "Change Image" : "Upload Image"}
+              </Button>
+              {image && (
+                <button type="button" onClick={() => setImage(undefined)} className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-rose-600">
+                  <X className="h-3 w-3" /> Remove
+                </button>
+              )}
+            </div>
+            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { onFile(e.target.files?.[0]); e.target.value = ""; }} />
+          </div>
+        </div>
+        {error && <p className="text-[12px] font-medium text-rose-600">{error}</p>}
+      </div>
+    </RoxCenteredForm>
   );
 }

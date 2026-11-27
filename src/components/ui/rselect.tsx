@@ -49,6 +49,8 @@ export function RSelect({
 }) {
   const [q, setQ] = React.useState("");
   const selected = options.find((o) => o.value === value);
+  // An option whose value is "" (e.g. "Select category…", "Skip") is an empty state, not a filled one.
+  const isFilled = !!selected && selected.value !== "";
   const filtered = searchable && q.trim()
     ? options.filter((o) => o.label.toLowerCase().includes(q.trim().toLowerCase()))
     : options;
@@ -75,6 +77,7 @@ export function RSelect({
         <button
           type="button"
           onClick={toggle}
+          data-filled={String(isFilled)}
           className={cn(
             "flex h-[34px] w-full items-center justify-between gap-2 rounded-xl border bg-card px-3 text-[13px] transition-all duration-150",
             open
@@ -83,7 +86,7 @@ export function RSelect({
             className
           )}
         >
-          <span className={cn("flex min-w-0 items-center gap-2 truncate text-left", !selected && "text-muted-foreground")}>
+          <span className={cn("flex min-w-0 items-center gap-2 truncate text-left", isFilled ? "rox-filled-text" : "rox-placeholder-text")}>
             {selected?.swatch && (
               <span
                 className="h-3 w-3 shrink-0 rounded-full ring-1 ring-inset ring-black/15"

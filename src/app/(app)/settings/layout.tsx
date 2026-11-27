@@ -21,7 +21,9 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
     // use the available space.
     pathname.startsWith("/settings/inventory/price-lists") ||
     // Trash Bin is a wide data table (6+ columns with people + dates).
-    pathname.startsWith("/settings/system/trash");
+    pathname.startsWith("/settings/system/trash") ||
+    // Lead Form Options is a two-pane field/option editor.
+    pathname.startsWith("/settings/leads/form-edit");
 
   return (
     <div className="flex -mx-4 -mt-2 -mb-4 sm:-mx-6 lg:-mx-8" style={{ height: "calc(100vh - 56px)" }}>

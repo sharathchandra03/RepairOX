@@ -21,7 +21,8 @@
    jumps. The popover repositions on scroll/resize to stay glued to the field.
    ────────────────────────────────────────────────────────────────────────── */
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useAnimatedPlaceholder } from "@/hooks/use-animated-placeholder";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { X, Plus } from "lucide-react";
 import { useStore } from "@/lib/store";
@@ -36,7 +37,10 @@ export function IssueSelector({
   className,
   placeholder,
   pillClassName,
+  pillRemoveClassName,
   fieldClassName,
+  animatedPlaceholder = false,
+  inputClassName,
 }: {
   /** Canonical comma-separated issue string. */
   value: string;
@@ -45,10 +49,20 @@ export function IssueSelector({
   placeholder?: string;
   /** Optional extra classes applied to each selected issue pill (compact use). */
   pillClassName?: string;
+  /** Optional extra classes for the small × inside each pill (e.g. a themed hover). */
+  pillRemoveClassName?: string;
   /** Optional extra classes applied to the field/search box itself — lets a
    *  caller render a taller box (e.g. a textarea-sized box) instead of the
    *  compact default. Overrides the default min/max height. */
   fieldClassName?: string;
+  /** Cycle real issue names from the Issue Master through the empty placeholder
+   *  ("Search or add issues, e.g. Battery Drain" → "…e.g. Display Broken" …).
+   *  Pauses while focused / typing / once an issue is picked; honours
+   *  prefers-reduced-motion (shared useAnimatedPlaceholder). */
+  animatedPlaceholder?: boolean;
+  /** Extra classes for the type-to-search input (e.g. a smaller height to sit
+   *  level with compact pills). */
+  inputClassName?: string;
 }) {
   const { issueLibrary, addIssueToStore } = useStore();
   const [open, setOpen] = useState(false);
@@ -57,6 +71,7 @@ export function IssueSelector({
   const fieldRef = useRef<HTMLDivElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [focused, setFocused] = useState(false);
 
   const selected = parseIssueString(value);
 
@@ -158,6 +173,12 @@ export function IssueSelector({
     }
   };
 
+  const exampleIssues = useMemo(() => issueLibrary.slice(0, 15), [issueLibrary]);
+  const runningPlaceholder = useAnimatedPlaceholder({
+    prefix: "Search or add issues, e.g. ",
+    words: exampleIssues,
+    paused: !animatedPlaceholder || focused || !!query || selected.length > 0,
+  });
   const showCreate = query.trim() && !issueLibrary.some((i) => i.toLowerCase() === query.trim().toLowerCase());
 
   return (
@@ -166,8 +187,9 @@ export function IssueSelector({
       <div
         ref={fieldRef}
         onClick={() => { setOpen(true); setTimeout(() => inputRef.current?.focus(), 0); }}
+        data-filled={String(selected.length > 0)}
         className={cn(
-          "flex min-h-[44px] max-h-[110px] w-full flex-wrap items-start content-start gap-1.5 overflow-y-auto rounded-xl border bg-card px-3 py-2 text-sm transition-all duration-150 cursor-text",
+          "flex min-h-[44px] max-h-[110px] w-full flex-wrap items-center content-start gap-1.5 overflow-y-auto rounded-xl border bg-card px-3 py-2 text-sm transition-all duration-150 cursor-text",
           "border-input hover:border-[#4361EE]/40 focus-within:border-[#4361EE] focus-within:ring-2 focus-within:ring-[#4361EE]/10",
           fieldClassName,
         )}
@@ -181,7 +203,7 @@ export function IssueSelector({
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); removeIssue(issue); }}
-              className="grid h-4 w-4 place-items-center rounded-full hover:bg-[#4361EE]/10 transition"
+              className={cn("grid h-4 w-4 place-items-center rounded-full hover:bg-[#4361EE]/10 transition", pillRemoveClassName)}
             >
               <X className="h-3 w-3" />
             </button>
@@ -191,10 +213,14 @@ export function IssueSelector({
           ref={inputRef}
           value={query}
           onChange={(e) => { setQuery(e.target.value); if (!open) setOpen(true); }}
-          onFocus={() => setOpen(true)}
+          onFocus={() => { setOpen(true); setFocused(true); }}
+          onBlur={() => setFocused(false)}
           onKeyDown={handleKeyDown}
-          placeholder={selected.length === 0 ? (placeholder || "Search or add issues…") : "Add more…"}
-          className="min-w-[100px] flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground focus:outline-none focus-visible:outline-none focus-visible:shadow-none focus-visible:ring-0"
+          placeholder={selected.length === 0
+            ? (animatedPlaceholder && exampleIssues.length > 0 && !focused ? runningPlaceholder : (placeholder || "Search or add issues…"))
+            : "Add more…"}
+          aria-label={placeholder || "Search or add issues"}
+          className={cn("h-[31px] min-w-[100px] flex-1 self-center bg-transparent px-1 text-sm leading-[31px] outline-none placeholder:text-muted-foreground focus:outline-none focus-visible:outline-none focus-visible:shadow-none focus-visible:ring-0", inputClassName)}
         />
       </div>
 

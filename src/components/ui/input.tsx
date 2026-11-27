@@ -62,6 +62,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           value={value}
           defaultValue={defaultValue}
           placeholder={animate ? animated : placeholder}
+          data-filled={value !== undefined ? String(value !== null && String(value) !== "") : undefined}
           onFocus={(e) => { setFocused(true); onFocus?.(e); }}
           onBlur={(e) => { setFocused(false); onBlur?.(e); }}
           className={cn(
@@ -98,6 +99,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTML
   ({ className, ...props }, ref) => (
     <textarea
       ref={ref}
+      data-filled={props.value !== undefined ? String(props.value !== null && String(props.value) !== "") : undefined}
       className={cn(
         "min-h-[80px] w-full rounded-xl border border-input bg-card px-3 py-2 text-[13px] placeholder:text-muted-foreground transition-all duration-150 resize-none",
         "hover:border-[#4361EE]/40",
@@ -142,6 +144,8 @@ export function Select({ value, defaultValue, onChange, options, className, plac
   const ref = React.useRef<HTMLDivElement>(null);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
   const selected = options.find((o) => o.value === currentValue);
+  // An option whose value is "" (e.g. "Select category…", "Skip") is an empty state, not a filled one.
+  const isFilled = !!selected && selected.value !== "";
 
   // The dropdown panel is rendered in a portal with FIXED positioning so it's
   // never clipped by a scrolling/overflow-hidden ancestor (e.g. inside a modal
@@ -197,6 +201,7 @@ export function Select({ value, defaultValue, onChange, options, className, plac
         type="button"
         disabled={disabled}
         onClick={() => !disabled && setOpen(!open)}
+        data-filled={String(isFilled)}
         className={cn(
           "flex h-11 w-full items-center justify-between gap-2 rounded-xl border bg-card px-3.5 text-sm transition-all duration-150",
           accent
@@ -206,7 +211,7 @@ export function Select({ value, defaultValue, onChange, options, className, plac
           className
         )}
       >
-        <span className={cn("truncate text-left", !selected && "text-muted-foreground")}>
+        <span className={cn("truncate text-left", isFilled ? "rox-filled-text" : "rox-placeholder-text")}>
           {selected ? selected.label : (placeholder || "Select…")}
         </span>
         <span className={cn("text-muted-foreground transition-transform duration-200", open && "rotate-180")}>▾</span>

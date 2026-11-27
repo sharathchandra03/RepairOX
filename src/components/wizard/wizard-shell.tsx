@@ -55,7 +55,7 @@ export function WizardShell({
           onClick={onBack}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          className="grid h-10 w-10 place-items-center rounded-2xl border border-[#2B3553] bg-[#2B3553] text-white shadow-card transition hover:bg-[#1B2238] hover:border-[#1B2238]"
+          className="grid h-10 w-10 place-items-center rounded-2xl border border-black bg-[linear-gradient(180deg,#4361EE_0%,#3B54E8_100%)] text-white shadow-[0_8px_24px_-10px_rgba(67,97,238,0.55)] transition hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
           aria-label="Back"
         >
           <ArrowLeft className="rox-back-arrow h-4 w-4" />
@@ -109,7 +109,7 @@ export function WizardShell({
         {onClose ? (
           <button
             onClick={onClose}
-            className="grid h-10 w-10 place-items-center rounded-2xl border border-[#2B3553] bg-[#2B3553] text-white shadow-card transition hover:bg-[#1B2238] hover:border-[#1B2238]"
+            className="grid h-10 w-10 place-items-center rounded-2xl border border-black bg-[linear-gradient(180deg,#4361EE_0%,#3B54E8_100%)] text-white shadow-[0_8px_24px_-10px_rgba(67,97,238,0.55)] transition hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
             aria-label="Close"
           >
             <X className="h-4 w-4" />
@@ -117,7 +117,7 @@ export function WizardShell({
         ) : (
           <Link
             href={closeHref || "/tickets"}
-            className="grid h-10 w-10 place-items-center rounded-2xl border border-[#2B3553] bg-[#2B3553] text-white shadow-card transition hover:bg-[#1B2238] hover:border-[#1B2238]"
+            className="grid h-10 w-10 place-items-center rounded-2xl border border-black bg-[linear-gradient(180deg,#4361EE_0%,#3B54E8_100%)] text-white shadow-[0_8px_24px_-10px_rgba(67,97,238,0.55)] transition hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
             aria-label="Close"
           >
             <X className="h-4 w-4" />

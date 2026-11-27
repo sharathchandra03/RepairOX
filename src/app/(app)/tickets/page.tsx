@@ -1,5 +1,6 @@
 "use client";
 
+import { useTicketFieldOptions } from "@/lib/ticket-field-options";
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -34,7 +35,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ModalPortal } from "@/components/ui/modal-portal";
 import { DeviceDetailsOverlay } from "@/components/tickets/device-details-overlay";
 import { Pagination } from "@/components/ui/pagination";
-import { STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, TICKET_TYPE_LABEL, type TicketStatus, type Ticket, type TicketPriority, getTicketDevices, getTicketType, ticketInvoiceCoverage, type TicketInvoiceCoverage, getRecordType, isEstimate, isWarranty, ESTIMATE_STATUS_LABEL, ESTIMATE_STATUS_TONE, ESTIMATE_STATUS_OPTIONS, WARRANTY_STATUS_LABEL, WARRANTY_STATUS_TONE, WARRANTY_STATUS_OPTIONS, type RecordType, type WarrantyStatus } from "@/lib/mock-data";
+import { STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, type TicketStatus, type Ticket, type TicketPriority, getTicketDevices, getTicketType, ticketInvoiceCoverage, type TicketInvoiceCoverage, getRecordType, isEstimate, isWarranty, ESTIMATE_STATUS_LABEL, ESTIMATE_STATUS_TONE, ESTIMATE_STATUS_OPTIONS, WARRANTY_STATUS_LABEL, WARRANTY_STATUS_TONE, WARRANTY_STATUS_OPTIONS, type RecordType, type WarrantyStatus } from "@/lib/mock-data";
 import { PushToInvoiceDialog } from "@/components/tickets/push-to-invoice-dialog";
 import { parseIssueString } from "@/lib/issue-library";
 import { useStore } from "@/lib/store";
@@ -109,13 +110,10 @@ const PRIORITY_OPTIONS = [
   { label: "Overdue Time", value: "overdue" },
 ];
 
-/** Ticket intake Type filter options — mirrors the WK/PD/OS avatar Types. */
-const TYPE_OPTIONS = [
-  { label: "All Types", value: "all" },
-  { label: TICKET_TYPE_LABEL.walkin, value: "walkin" },
-  { label: TICKET_TYPE_LABEL.pickup, value: "pickup" },
-  { label: TICKET_TYPE_LABEL.onsite, value: "onsite" },
-];
+/** Saved Lead Type of a ticket (first device that has one) — built-in or custom. */
+function ticketLeadType(t: Ticket): string {
+  return getTicketType(t) ?? (getTicketDevices(t).find((d) => d.type)?.type ?? "");
+}
 
 /** Record-type filter strip — All / Ticket / Estimate / Warranty. This is the
  *  RECORD kind (Ticket vs Repair Estimate vs future Warranty), NOT the intake
@@ -214,6 +212,9 @@ export default function TicketsPage() {
   // Ticket intake Type filter (Walk-In / Pick-Up / On-Site). Reads the saved
   // ticket Type via getTicketType — the same source as the WK/PD/OS avatar.
   const [typeFilter, setTypeFilter] = useState<string>("all");
+  // Lead Type options = built-in Walk-In / Pick-Up / On-Site + any added in
+  // Settings › Tickets › Assigned & Options (or via "+ Add" in the ticket form).
+  const { optionsFor: leadTypeOptionsFor } = useTicketFieldOptions();
   // Record-type filter (All / Ticket / Estimate / Warranty). Composes with all
   // existing filters and works immediately (no pinning required). Reads the
   // authoritative recordType via getRecordType — never the id prefix.
@@ -503,13 +504,13 @@ export default function TicketsPage() {
     },
     {
       id: "type",
-      label: "Type",
+      label: "Lead Type",
       type: "select" as const,
       value: typeFilter,
-      options: TYPE_OPTIONS,
+      options: [{ label: "All Types", value: "all" }, ...leadTypeOptionsFor("lead_type")],
       onChange: (v: string) => setTypeFilter(v),
     },
-  ], [priorityFilter, techFilter, statusFilter, statusFilterLabel, statusFilterOptions, dateRange, customerTypeFilter, typeFilter, technicians]);
+  ], [priorityFilter, techFilter, statusFilter, statusFilterLabel, statusFilterOptions, dateRange, customerTypeFilter, typeFilter, technicians, leadTypeOptionsFor]);
 
   // Set of ticket IDs that have at least one invoice generated from them.
   // Derived from the actual DB-backed invoice relationship (invoice.ticketId),
@@ -563,7 +564,7 @@ export default function TicketsPage() {
               : t.priority === priorityFilter);
         const okTech = techFilter === "all" || t.technician === techFilter;
         const okCustomerType = customerTypeFilter === "all" || (customerTypeFilter === "personal" ? (t.customerType === "personal" || !t.customerType) : t.customerType === customerTypeFilter);
-        const okType = typeFilter === "all" || getTicketType(t) === typeFilter;
+        const okType = typeFilter === "all" || ticketLeadType(t) === typeFilter;
         // Record-type filter — resolves the AUTHORITATIVE type (getRecordType),
         // so legacy rows without a recordType always count as "ticket".
         const okRecordType = recordTypeFilter === "all" || getRecordType(t) === recordTypeFilter;
@@ -916,7 +917,7 @@ export default function TicketsPage() {
       <div
         ref={stickyWrapRef}
         style={{ top: workspaceTop }}
-        className="sticky z-10 -mt-5 space-y-5 bg-[hsl(var(--background))] pt-5 pb-5 shadow-[-32px_0_0_0_hsl(var(--background)),32px_0_0_0_hsl(var(--background))]"
+        className={`sticky z-10 -mt-5 bg-[hsl(var(--background))] pt-5 shadow-[-32px_0_0_0_hsl(var(--background)),32px_0_0_0_hsl(var(--background))] ${controlsCollapsed ? "space-y-0 pb-2" : "space-y-5 pb-5"}`}
       >
       {/* Date Range — stays ALWAYS visible (never collapses), on the same row as
           the ONE Collapse/Expand control (top-right). The date strip + the
@@ -1088,7 +1089,7 @@ export default function TicketsPage() {
                   same saved value as the WK/PD/OS avatar (no duplicate system). */}
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <label className="text-[11px] font-medium text-muted-foreground">Type</label>
+                  <label className="text-[11px] font-medium text-muted-foreground">Lead Type</label>
                   <button
                     onClick={() => togglePin("type")}
                     className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors", isPinned("type") ? "text-[#4361EE] bg-[#EEF1FD]" : "text-muted-foreground hover:text-foreground hover:bg-muted")}
@@ -1103,9 +1104,10 @@ export default function TicketsPage() {
                   onChange={(e: any) => setTypeFilter(e.target.value)}
                   options={[
                     { label: `All Types (${tickets.length})`, value: "all" },
-                    { label: `${TICKET_TYPE_LABEL.walkin} (${tickets.filter((t) => getTicketType(t) === "walkin").length})`, value: "walkin" },
-                    { label: `${TICKET_TYPE_LABEL.pickup} (${tickets.filter((t) => getTicketType(t) === "pickup").length})`, value: "pickup" },
-                    { label: `${TICKET_TYPE_LABEL.onsite} (${tickets.filter((t) => getTicketType(t) === "onsite").length})`, value: "onsite" },
+                    ...leadTypeOptionsFor("lead_type").map((o) => ({
+                      label: `${o.label} (${tickets.filter((t) => ticketLeadType(t) === o.value).length})`,
+                      value: o.value,
+                    })),
                   ]}
                 />
               </div>

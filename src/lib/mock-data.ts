@@ -845,7 +845,6 @@ export const navItems: NavItem[] = [
   { href: "/leads/productivity", label: "Agent Productivity", icon: "Clock", permission: ["work_sessions_view_team", "work_sessions_view_all", "manage_attendance", "view_sales_reports", "manage_reports"] },
   { href: "/leads/reports",    label: "Reports",      icon: "BarChart3", permission: ["manage_reports", "view_sales_reports", "view_financial_reports"] },
   { href: "/leads/campaigns", label: "Campaigns",    icon: "Boxes", permission: "manage_sales" },
-  { href: "/leads/settings",   label: "Settings",     icon: "Settings", permission: "manage_settings" },
 
   // Shared / general (present in every workspace)
   { href: "/activity",         label: "Activity Log", icon: "Activity", permission: "view_audit_logs" },
@@ -876,6 +875,10 @@ export const expandableNavGroups: Record<WorkspaceId, ExpandableNavGroup[]> = {
         { href: "/accounts/ledger",          label: "Daily Ledger",        icon: "BookOpen", permission: "view_financial_reports" },
         { href: "/accounts/banking",         label: "Banking & Transfers", icon: "Landmark", permission: "manage_payments" },
         { href: "/accounts/management",      label: "Account Management",  icon: "FolderTree", permission: "manage_payments" },
+        // Payments + Expenses live under Accounts (moved out of the flat
+        // ADMINISTRATION / BILLING items).
+        { href: "/shop/payments",            label: "Payments",            icon: "Wallet", permission: "manage_payments" },
+        { href: "/expenses",                 label: "Expenses",            icon: "IndianRupee", permission: "manage_payments" },
       ],
     },
   ],
@@ -2114,14 +2117,15 @@ export const navGroups: Record<WorkspaceId, { label: string; items: string[] }[]
     // Expenses remains standalone for daily operational quick-access.
     // Employees and Accounts are now expandable groups rendered separately.
     // Roles & Permissions has moved to Settings → Roles & Permissions.
-    { label: "ADMINISTRATION", items: ["/expenses"] },
-    { label: "BILLING",        items: ["/shop/payments"] },
+    // Employees + Accounts (incl. Payments and Expenses) render here as
+    // expandable groups.
+    { label: "ADMINISTRATION", items: [] },
     { label: "GENERAL",        items: ["/activity", "/reports", "/settings"] },
   ],
   operations: [
     { label: "MODULE",     items: ["/operations", "/field", "/field/insights", "/field/activity", "/stock"] },
     { label: "PURCHASING", items: ["/operations/vendors", "/operations/purchase-orders", "/operations/transfers", "/operations/products"] },
-    { label: "GENERAL",    items: ["/operations/reports", "/settings"] },
+    { label: "GENERAL",    items: ["/operations/reports"] },
   ],
   leads: [
     { label: "PIPELINE",       items: ["/lead-management", "/leads/list", "/leads/price-list", "/leads/kanban", "/leads/contacts", "/leads/companies"] },
@@ -2129,6 +2133,6 @@ export const navGroups: Record<WorkspaceId, { label: string; items: string[] }[]
     { label: "PERFORMANCE",    items: ["/leads/sales-book", "/leads/performance", "/leads/intelligence", "/leads/productivity"] },
     { label: "COMMUNICATE",    items: ["/leads/inbox", "/leads/tasks", "/leads/meetings", "/leads/activities", "/leads/calls", "/leads/email", "/leads/whatsapp"] },
     { label: "VIEWS",          items: ["/leads/smart-lists", "/leads/map-view", "/leads/unattributed", "/leads/campaigns"] },
-    { label: "GENERAL",        items: ["/leads/reports", "/leads/settings"] },
+    { label: "GENERAL",        items: ["/leads/reports"] },
   ],
 };

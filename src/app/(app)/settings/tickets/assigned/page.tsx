@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Trash2, UserPlus, Users } from "lucide-react";
+import { Plus, Trash2, UserPlus, Users, Megaphone, Wrench, Lock, Route } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
@@ -9,6 +9,11 @@ import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 import { createAssignedByOption } from "@/lib/assigned-by-data";
 import { createAssignedToOption } from "@/lib/assigned-to-data";
+import { usePermissions } from "@/lib/permissions-context";
+import { CAP, allow } from "@/lib/capabilities";
+import {
+  useTicketFieldOptions, BUILT_IN_TICKET_OPTIONS, TICKET_OPTION_FIELD_LABEL, type TicketOptionField,
+} from "@/lib/ticket-field-options";
 
 export default function AssignedSettingsPage() {
   const {
@@ -41,8 +46,8 @@ export default function AssignedSettingsPage() {
     <div className="space-y-6">
       <PageHeader
         eyebrow="Settings › Tickets"
-        title="Assigned By & Assigned To"
-        subtitle="Manage the people who assign tickets and the technicians they get assigned to."
+        title="Assigned & Ticket Options"
+        subtitle="Manage Assigned By / Assigned To and the Lead Type, Source and Job Type options used when creating a ticket."
       />
 
       {/* ─── Assigned By Section ─── */}
@@ -178,6 +183,115 @@ export default function AssignedSettingsPage() {
         )}
         <p className="mt-2 text-[11px] text-muted-foreground">{assignedToOptions.length} total</p>
       </div>
+      {/* ─── Lead Type + Source + Job Type (ticket dropdown options) ─── */}
+      <TicketOptionSection
+        field="lead_type"
+        icon={Route}
+        tone="bg-sky-50 text-sky-600"
+        hint="How the device comes in. Shown in Device Details → Lead Type."
+        placeholder="e.g. Courier, Corporate"
+      />
+      <TicketOptionSection
+        field="source"
+        icon={Megaphone}
+        tone="bg-amber-50 text-amber-600"
+        hint="Where the customer came from. Shown in Device Details → Source."
+        placeholder="e.g. Instagram, JustDial"
+      />
+      <TicketOptionSection
+        field="job_type"
+        icon={Wrench}
+        tone="bg-violet-50 text-violet-600"
+        hint="What kind of job it is. Shown in Job Details → Job Type."
+        placeholder="e.g. Data Recovery, Software"
+      />
+    </div>
+  );
+}
+
+function TicketOptionSection({
+  field, icon: Icon, tone, hint, placeholder,
+}: {
+  field: TicketOptionField;
+  icon: React.ComponentType<{ className?: string }>;
+  tone: string;
+  hint: string;
+  placeholder: string;
+}) {
+  const { options, addOption, deleteOption } = useTicketFieldOptions();
+  const { can } = usePermissions();
+  const canAdd = allow(can, CAP.ticket.addFieldOption);
+  const canDelete = allow(can, CAP.settings.ticketSettings);
+  const [value, setValue] = useState("");
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const label = TICKET_OPTION_FIELD_LABEL[field];
+  const builtIns = BUILT_IN_TICKET_OPTIONS[field];
+  const custom = options.filter((o) => o.field === field);
+
+  const handleAdd = async () => {
+    if (!value.trim()) return;
+    const ok = await addOption(field, value);
+    if (ok) setValue("");
+  };
+
+  return (
+    <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
+      <div className="flex items-center gap-2 mb-4">
+        <span className={cn("grid h-8 w-8 place-items-center rounded-lg", tone)}>
+          <Icon className="h-4 w-4" />
+        </span>
+        <div>
+          <p className="text-sm font-semibold">{label}</p>
+          <p className="text-[11px] text-muted-foreground">{hint}</p>
+        </div>
+      </div>
+      {canAdd && (
+        <div className="flex items-end gap-3 mb-4">
+          <div className="flex-1 space-y-1">
+            <Label>{label} name</Label>
+            <Input
+              value={value}
+              onChange={(e: any) => setValue(e.target.value)}
+              placeholder={placeholder}
+              onKeyDown={(e: any) => e.key === "Enter" && handleAdd()}
+            />
+          </div>
+          <Button size="md" onClick={handleAdd} disabled={!value.trim()}>
+            <Plus className="h-4 w-4" /> Add
+          </Button>
+        </div>
+      )}
+      <div className="divide-y divide-border rounded-xl border border-border overflow-hidden">
+        {builtIns.map((o) => (
+          <div key={o.value} className="flex items-center justify-between px-4 py-3">
+            <p className="text-sm font-medium">{o.label}</p>
+            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground" title="Built-in option — can't be removed">
+              <Lock className="h-3 w-3" /> Built-in
+            </span>
+          </div>
+        ))}
+        {custom.map((o) => (
+          <div key={o.id} className="flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition">
+            <p className="text-sm font-medium">{o.label}</p>
+            {!canDelete ? null : confirmId === o.id ? (
+              <div className="flex items-center gap-1.5">
+                <Button size="sm" variant="outline" onClick={() => setConfirmId(null)}>Cancel</Button>
+                <Button size="sm" onClick={() => { deleteOption(o.id); setConfirmId(null); }} className="bg-rose-600 hover:bg-rose-700 text-white">Delete</Button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmId(o.id)}
+                className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:text-rose-500 hover:bg-rose-50 transition"
+                title="Delete (existing tickets keep this value)"
+                aria-label={`Delete ${o.label}`}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-[11px] text-muted-foreground">{builtIns.length} built-in · {custom.length} added</p>
     </div>
   );
 }

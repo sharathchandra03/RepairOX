@@ -28,7 +28,10 @@
      visible outline, WITHOUT affecting card/table/divider borders (which keep
      --border). Same thickness/radius/shape; only the colour is darker.
      Hover/focus/error keep their existing RepairOX treatments. */
-  --input-border: 220 14% 60%;
+  --input-border: 224 18% 40%;
+  /* Filled vs empty form fields (see "FILLED vs PLACEHOLDER" below). */
+  --placeholder: 226 10% 66%;
+  --input-border-filled: 224 18% 40%;
   --ring: 231 80% 57%;
 
   --primary: 231 80% 57%;
@@ -129,7 +132,9 @@
   --popover-foreground: 210 24% 94%;
 
   --border: 223 16% 20%;           /* soft, low-contrast gray/blue borders */
-  --input-border: 223 12% 46%;     /* form-input idle border — clearly visible soft line */
+  --input-border: 220 16% 66%;     /* form-input idle border — clearly visible soft line */
+  --placeholder: 220 9% 47%;
+  --input-border-filled: 220 16% 66%;
   --ring: 231 85% 66%;             /* focus ring — bright RepairOX blue */
 
   /* Primary — keep the RepairOX royal blue, brightened slightly for contrast */
@@ -1775,3 +1780,43 @@ html[data-chrome-head="light"] .rox-chrome-head input { color: var(--chrome-head
    whatever the sidebar tone is). Must out-rank the light-sidebar text override above. */
 :is(html, html[data-chrome-side]) .rox-sidebar .rox-nav-active.rox-nav-active.rox-nav-active,
 :is(html, html[data-chrome-side]) .rox-sidebar .rox-nav-active.rox-nav-active.rox-nav-active * { color: var(--chrome-pill-text) !important; text-shadow: none !important; }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   FILLED vs PLACEHOLDER — CRM-wide form rule (permanent)
+   Users must see at a glance which fields are filled and which are not.
+     • Example/placeholder text: light grey, normal weight, italic.
+     • Typed / selected values:  foreground colour, medium weight.
+     • A filled shared field (data-filled="true") gets a firmer idle border by
+       swapping --input-border; accent borders (amber notes, rose issue…) and
+       hover/focus/error borders are untouched.
+   Shared controls (Input, Textarea, Select, RSelect, IssueSelector) set
+   data-filled. Chrome search boxes on the sidebar/topbar keep their own style.
+   ══════════════════════════════════════════════════════════════════════════ */
+:is(input, textarea):not(:is(.rox-sidebar, .rox-chrome-head) *)::placeholder {
+  color: hsl(var(--placeholder)) !important;
+  font-style: italic;
+  font-weight: 400;
+  opacity: 1;
+}
+/* `html :where()` = specificity 0,0,1: beats Tailwind preflight's
+   `font-weight: inherit`, loses to any utility class (font-mono, font-bold…). */
+html :where(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"], [type="color"]), textarea) {
+  font-weight: 500;
+}
+html :where(input, textarea):where(:placeholder-shown) {
+  font-weight: 400;
+}
+[data-filled="true"] {
+  --input-border: var(--input-border-filled);
+}
+/* Dropdown trigger placeholder ("Select…") — same look as text placeholders. */
+.rox-placeholder-text {
+  color: hsl(var(--placeholder));
+  font-style: italic;
+  font-weight: 400;
+}
+.rox-filled-text {
+  color: hsl(var(--foreground));
+  font-weight: 500;
+}

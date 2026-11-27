@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Search, ChevronDown, Building2, Users, CreditCard,
   Package, Ticket, FileText, UserCheck, Plug, Bell, Settings2,
-  ShieldCheck, Truck, Printer, Receipt, BarChart3, Palette, Footprints, Tags,
+  ShieldCheck, Truck, Printer, Receipt, BarChart3, Palette, Footprints, Tags, Target,
 } from "lucide-react";
 import { usePermissions } from "@/lib/permissions-context";
 import { allow } from "@/lib/capabilities";
@@ -67,9 +67,20 @@ const SETTINGS_NAV: NavSection[] = [
       { label: "Ticket Settings", href: "/settings/tickets/general" },
       { label: "Quality Check", href: "/settings/tickets/qc" },
       { label: "Workflow", href: "/settings/tickets/workflow" },
-      { label: "Assigned By & To", href: "/settings/tickets/assigned" },
+      { label: "Assigned & Options", href: "/settings/tickets/assigned" },
       { label: "Device Categories", href: "/settings/categories" },
       { label: "Device Colours", href: "/settings/colours" },
+    ],
+  },
+  {
+    // Lead Management settings — moved here from the Leads module sidebar so
+    // every setting lives in ONE place. (Lead Store Mode + first-response SLA
+    // stay in Store Information: they are store-level configuration.)
+    id: "leads", label: "Leads", icon: Target,
+    children: [
+      { label: "Lead Form Options", href: "/settings/leads/form-edit" },
+      { label: "Productivity", href: "/settings/leads/productivity" },
+      { label: "Lead Store Mode & SLA", href: "/settings/store" },
     ],
   },
   {

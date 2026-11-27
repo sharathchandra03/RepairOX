@@ -1,5 +1,6 @@
 "use client";
 
+import { toast } from "@/components/ui/toaster";
 import React, { useState, useEffect, useRef, useMemo, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -13,7 +14,7 @@ import {
 } from "lucide-react";
 import { WizardShell } from "@/components/wizard/wizard-shell";
 import { OptionGrid } from "@/components/wizard/option-grid";
-import { CategoryWheel } from "@/components/wizard/category-wheel";
+import { CategoryWheel, AddCategoryDialog } from "@/components/wizard/category-wheel";
 import { CreationSuccess } from "@/components/ui/creation-success";
 import { CompletionScreen } from "@/components/completion/completion-screen";
 import { AddContactModal } from "@/components/common/add-contact-modal";
@@ -29,6 +30,9 @@ import { useStore } from "@/lib/store";
 import { useField } from "@/lib/field-context";
 import { useLeads } from "@/lib/leads-context";
 import { InventorySearchBox } from "@/components/inventory/inventory-search-box";
+import { TicketPhotoUploader } from "@/components/tickets/ticket-photo-uploader";
+import { uploadTicketPhotos, deleteTicketPhoto, listTicketPhotos, useTicketPhotos, setTicketPhotoLocalMode, type PendingPhoto } from "@/lib/ticket-photos";
+import { useTicketFieldOptions, TICKET_OPTION_FIELD_LABEL, type TicketOptionField } from "@/lib/ticket-field-options";
 import { AddInventoryModal } from "@/components/inventory/add-inventory-modal";
 import { Can } from "@/components/common/can";
 import { useStoreSettings } from "@/lib/store-settings";
@@ -204,7 +208,10 @@ type WizardData = {
    *  linkedLeadId so the originating Sales Agent keeps credit. Never inferred
    *  from customer history — only an explicit link sets this. */
   linkedLeadId?: string | null;
-  files: string[];
+  /** Photos picked in the Upload step, uploaded right after the ticket saves. */
+  photos: PendingPhoto[];
+  /** Saved photos (edit mode) the user removed — deleted on save. */
+  removedPhotoIds: string[];
   signatureCleared: boolean;
   /* Backward-compat computed accessors — these alias into devices[activeDeviceIndex] */
 };
@@ -223,7 +230,8 @@ const DEFAULT: WizardData = {
   customer: { first: "", last: "", phone: "", altPhone: "", email: "", address: "", postal: "", city: "", company: "" },
   customerId: null,
   linkedLeadId: null,
-  files: [],
+  photos: [],
+  removedPhotoIds: [],
   signatureCleared: false,
 };
 
@@ -300,7 +308,8 @@ function ticketToWizard(t: Ticket): WizardData {
       gstNumber: t.gstNumber || "",
       customer: { first, last, phone: t.phone || "", altPhone: (t as any).altPhone || "", email: t.email || "", address, postal, city, company: t.company || "" },
       customerId: (t as any).customerId || null,
-      files: [],
+      photos: [],
+      removedPhotoIds: [],
       signatureCleared: false,
     };
   }
@@ -352,7 +361,8 @@ function ticketToWizard(t: Ticket): WizardData {
     gstNumber: t.gstNumber || "",
     customer: { first, last, phone: t.phone || "", altPhone: (t as any).altPhone || "", email: t.email || "", address, postal, city, company: t.company || "" },
     customerId: (t as any).customerId || null,
-    files: [],
+    photos: [],
+    removedPhotoIds: [],
     signatureCleared: false,
   };
 }
@@ -369,7 +379,8 @@ function genId(): string {
 
 function NewTicketWizard() {
   const router = useRouter();
-  const { can } = usePermissions();
+  const { can, isDemoMode, currentUser: photoUser } = usePermissions();
+  useEffect(() => { setTicketPhotoLocalMode(isDemoMode); }, [isDemoMode]);
   const searchParams = useSearchParams();
   const editId = searchParams.get("edit");
   const fromPage = searchParams.get("from");
@@ -725,6 +736,21 @@ function NewTicketWizard() {
     }
   };
 
+  /** Save the Upload-step photos for a saved ticket (delete removed ones first,
+   *  so a replacement fits within the 3-photo limit). Never blocks the ticket. */
+  const savePhotos = async (ticketId: string) => {
+    if (!ticketId) return;
+    if (data.removedPhotoIds.length > 0) {
+      const saved = await listTicketPhotos(ticketId);
+      for (const p of saved.filter((x) => data.removedPhotoIds.includes(x.id))) {
+        const err = await deleteTicketPhoto(p);
+        if (err) toast.error("A photo couldn't be removed", { description: err });
+      }
+    }
+    if (data.photos.length === 0) return;
+    const { saved, error } = await uploadTicketPhotos(ticketId, data.photos, photoUser?.name);
+    if (error) toast.error(saved > 0 ? `${saved} photo(s) saved, some failed` : "Photos not saved", { description: error });
+  };
   const handleSave = async () => {
     const customerName = `${data.customer.first} ${data.customer.last}`.trim() || "Walk-in Customer";
     const primaryDevice = data.devices[0];
@@ -934,6 +960,7 @@ function NewTicketWizard() {
 
     if (isEdit) {
       updateTicket(editId, ticketData);
+      await savePhotos(editId!);
       setDirty(false);
       setShowSaveToast(true);
       setTimeout(() => {
@@ -943,6 +970,7 @@ function NewTicketWizard() {
       // addTicket assigns the real sequential ticket number (T-001, …) from the
       // DB and returns it. Use that id everywhere downstream.
       const newId = await addTicket(ticketData);
+      await savePhotos((newId as string) || ticketData.id);
       // Tracks whether the originating Lead was linked by any EXPLICIT path
       // (direct banner link / walk-in / field conversion). When it stays false
       // the automatic identity safety net runs after the conversion blocks.
@@ -1340,7 +1368,7 @@ function NewTicketWizard() {
           {step === 6 && <PartsAssignment data={data} setData={setData} onNext={next} isEdit={isEdit} />}
           {step === 7 && <QuoteSummary data={data} setData={setData} onNext={next} isEdit={isEdit} />}
           {step === 8 && <QCForm data={data} setData={setData} onNext={next} isEdit={isEdit} />}
-          {step === 9 && <UploadStep data={data} setData={setData} onNext={next} isEdit={isEdit} />}
+          {step === 9 && <UploadStep data={data} setData={setData} onNext={next} isEdit={isEdit} ticketId={editId} />}
           {step === 10 && <ConfirmationStep onSubmit={handleSubmit} isEdit={isEdit} data={data} isEstimate={isEstimateMode} />}
         </div>
       </WizardShell>
@@ -1622,7 +1650,7 @@ function titleFor(step: number) {
     "Assign Items / Parts to Service",
     "Quotation Summary",
     "Pre-Quality Check",
-    "Upload Photos & Documents",
+    "Device Photos",
     "Ticket Confirmation",
   ][step - 1];
 }
@@ -1636,7 +1664,7 @@ function subtitleFor(step: number) {
     "Add spare parts and services consumed.",
     "Review the estimate before approval.",
     "Mark each checkpoint as Pass, Fail or Skip.",
-    "Attach device photos and any paperwork.",
+    "Take or upload up to 3 photos of the device (max 1 MB each).",
     "Verify all details before creating the ticket.",
   ][step - 1];
 }
@@ -1712,6 +1740,64 @@ function AddPersonDialog({
   );
 }
 
+/* ---------------- Add Ticket Option (Source / Job Type) ---------------- */
+/** Adds a value to the ticket Source / Job Type list (saved per organization in
+ *  `ticket_field_options`, managed in Settings › Tickets next to Assigned By/To)
+ *  and selects it on the current device. */
+function AddTicketOptionDialog({
+  field, initial, onClose, onAdded,
+}: {
+  field: TicketOptionField | null;
+  initial: string;
+  onClose: () => void;
+  onAdded: (value: string) => void;
+}) {
+  const { addOption } = useTicketFieldOptions();
+  const [name, setName] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { if (field) { setName(initial); setSaving(false); } }, [field, initial]);
+  if (!field) return null;
+  const label = TICKET_OPTION_FIELD_LABEL[field];
+  const handleSave = async () => {
+    if (!name.trim() || saving) return;
+    setSaving(true);
+    const value = await addOption(field, name);
+    setSaving(false);
+    if (value) { onAdded(value); onClose(); }
+  };
+  return (
+    <ModalPortal>
+    <div className="fixed inset-0 z-[9998] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={onClose}>
+      <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()}
+        role="dialog" aria-modal="true"
+        className="w-full max-w-sm rounded-2xl bg-card shadow-2xl ring-1 ring-border p-5">
+        <h3 className="text-base font-bold">Add {label}</h3>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          Saved to {label} in Settings › Tickets and available in every ticket.
+        </p>
+        <div className="mt-4 space-y-1">
+          <Label>{label} name</Label>
+          <Input
+            value={name}
+            onChange={(e: any) => setName(e.target.value)}
+            onKeyDown={(e: any) => e.key === "Enter" && handleSave()}
+            placeholder={field === "source" ? "e.g. Instagram, JustDial" : field === "lead_type" ? "e.g. Courier, Corporate" : "e.g. Data Recovery, Software"}
+            className="h-11"
+            autoFocus
+          />
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+          <Button size="sm" onClick={handleSave} disabled={!name.trim() || saving}>
+            <CheckCircle2 className="h-3.5 w-3.5" /> Save {label}
+          </Button>
+        </div>
+      </motion.div>
+    </div>
+    </ModalPortal>
+  );
+}
+
 /* ---------------- Step 4: Device Details (Simplified) ---------------- */
 function DeviceForm({ data, setData, onNext, isEdit }: any) {
   const { brands, deviceModels, addBrand, addDeviceModel, assignedByOptions, addAssignedByOption, assignedToOptions, addAssignedToOption } = useStore();
@@ -1719,6 +1805,10 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
   // (the Settings › Tickets list). Users without it can still select existing.
   const { can } = usePermissions();
   const canAddPerson = ADD_PERSON_PERMS.some((p) => can(p));
+  const canAddOption = allow(can, CAP.ticket.addFieldOption);
+  const { optionsFor } = useTicketFieldOptions();
+  const [addOptionField, setAddOptionField] = useState<TicketOptionField | null>(null);
+  const [addOptionName, setAddOptionName] = useState("");
   const activeIdx = data.activeDeviceIndex;
   const activeDevice = data.devices[activeIdx];
   const d = activeDevice.device;
@@ -1732,6 +1822,9 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
   const [identifierTouched, setIdentifierTouched] = useState(false);
   useEffect(() => { setIdentifierTouched(false); }, [activeIdx]);
 
+  // "+ Add Category" from the Category dropdown (same dialog as the wheel).
+  const canAddCategory = allow(can, CAP.settings.deviceCategoryCreate);
+  const [addCategoryOpen, setAddCategoryOpen] = useState(false);
   // Category options (master data — reused from Settings → Device Categories)
   const [categoryOptions, setCategoryOptions] = useState<{ id: string; label: string }[]>(
     () => getCachedCategories()?.map((c) => ({ id: c.id, label: c.label })) ?? []
@@ -2088,8 +2181,22 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
                   onChange={(v) => setDeviceCategory(v)}
                   placeholder="Select category…"
                   searchable
+                  addLabel="Add Category"
+                  alwaysShowAddNew={canAddCategory}
+                  onAddNew={canAddCategory ? () => setAddCategoryOpen(true) : undefined}
                   options={categoryOptions.map((c) => ({ label: c.label, value: c.id }))}
                 />
+                {canAddCategory && (
+                  <AddCategoryDialog
+                    open={addCategoryOpen}
+                    onClose={() => setAddCategoryOpen(false)}
+                    onCreated={(item, all) => {
+                      setCategoryOptions(all.map((c) => ({ id: c.id, label: c.label })));
+                      setDeviceCategory(item.id);
+                      setAddCategoryOpen(false);
+                    }}
+                  />
+                )}
               </Field>
             </div>
             {/* Brand Combobox — scoped to the active device's category */}
@@ -2240,12 +2347,17 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
         {/* Row 2 — Type | Source | Assigned By | Assigned To */}
         <div className="space-y-3">
           <div className="grid grid-cols-1 gap-x-2 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Field label="Type">
-              <RSelect value={d.type} onChange={(v) => set("type", v)} placeholder="Select type" options={[
-                { label: "Walk-In", value: "walkin" },
-                { label: "Pick-Up", value: "pickup" },
-                { label: "On-Site", value: "onsite" },
-              ]} />
+            <Field label="Lead Type">
+              <RSelect
+                value={d.type}
+                onChange={(v) => set("type", v)}
+                placeholder="Select lead type"
+                searchable
+                addLabel="Add Lead Type"
+                alwaysShowAddNew={canAddOption}
+                onAddNew={canAddOption ? (name) => { setAddOptionName(name); setAddOptionField("lead_type"); } : undefined}
+                options={optionsFor("lead_type", d.type)}
+              />
             </Field>
             <Field label="Source">
               {/* Ticket SOURCE = where the customer came from (marketing/origin
@@ -2253,14 +2365,16 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
                   how the repair is handled). "Walk-In" is a Type, never a Source,
                   so it is intentionally NOT listed here. These six values are the
                   single canonical source set shared with the Walk-In module. */}
-              <RSelect value={d.source} onChange={(v) => set("source", v)} placeholder="Select source" options={[
-                { label: "Google", value: "Google" },
-                { label: "Meta", value: "Meta" },
-                { label: "YouTube", value: "YouTube" },
-                { label: "GMB", value: "GMB" },
-                { label: "Organic", value: "Organic" },
-                { label: "Reference", value: "Reference" },
-              ]} />
+              <RSelect
+                value={d.source}
+                onChange={(v) => set("source", v)}
+                placeholder="Select source"
+                searchable
+                addLabel="Add Source"
+                alwaysShowAddNew={canAddOption}
+                onAddNew={canAddOption ? (name) => { setAddOptionName(name); setAddOptionField("source"); } : undefined}
+                options={optionsFor("source", d.source)}
+              />
             </Field>
             <Field label="Assigned By">
               <RSelect
@@ -2371,6 +2485,12 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
           name to the Settings › Tickets master (assigned_by/to options) so it
           reflects in Settings and every ticket, then auto-selects it into
           whichever field opened it. */}
+      <AddTicketOptionDialog
+        field={addOptionField}
+        initial={addOptionName}
+        onClose={() => setAddOptionField(null)}
+        onAdded={(v) => set(addOptionField === "lead_type" ? "type" : "source", v)}
+      />
       <AddPersonDialog
         open={addPersonOpen}
         onClose={() => setAddPersonOpen(false)}
@@ -2398,6 +2518,11 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
   const activeIdx = data.activeDeviceIndex;
   const activeDevice = data.devices[activeIdx];
   const j = activeDevice.job;
+  const { can: canJob } = usePermissions();
+  const canAddJobType = allow(canJob, CAP.ticket.addFieldOption);
+  const { optionsFor: jobOptionsFor } = useTicketFieldOptions();
+  const [addJobTypeOpen, setAddJobTypeOpen] = useState(false);
+  const [addJobTypeName, setAddJobTypeName] = useState("");
   const set = (k: string, v: string) => {
     const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
       i === activeIdx ? { ...dev, job: { ...dev.job, [k]: v } } : dev
@@ -2522,13 +2647,15 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
           <SectionLabel icon={ClipboardList} accent="indigo" hint="Type, priority & timing for this job.">Job Overview</SectionLabel>
           <div className="mt-2 grid grid-cols-1 gap-x-2 gap-y-1.5 sm:grid-cols-2">
             <Field label="Job Type">
-              <RSelect value={j.jobType} onChange={(v) => set("jobType", v)} options={[
-                { label: "Service", value: "service" },
-                { label: "Accessories", value: "accessories" },
-                { label: "Warranty", value: "warranty" },
-                { label: "Repair Estimate", value: "estimate" },
-                { label: "Buyback", value: "buyback" },
-              ]} />
+              <RSelect
+                value={j.jobType}
+                onChange={(v) => set("jobType", v)}
+                searchable
+                addLabel="Add Job Type"
+                alwaysShowAddNew={canAddJobType}
+                onAddNew={canAddJobType ? (name) => { setAddJobTypeName(name); setAddJobTypeOpen(true); } : undefined}
+                options={jobOptionsFor("job_type", j.jobType)}
+              />
               {/* Warranty and Repair Estimate are RECORD-LEVEL concepts in the
                   RepairOX ticket architecture, not per-device labels: a Repair
                   Estimate is its own record type chosen when the ticket is
@@ -2607,7 +2734,11 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
               <IssueSelector
                 value={j.issue}
                 onChange={(v) => set("issue", v)}
-                fieldClassName="min-h-[82px] max-h-[82px] rounded-lg"
+                fieldClassName="min-h-[82px] max-h-none overflow-visible gap-1 px-2.5 py-2 rounded-lg border-zinc-900 bg-[#FFF4F5] hover:border-black focus-within:border-black focus-within:ring-black/10"
+                pillClassName="gap-1 bg-rose-100 px-2 py-0.5 text-[12px] leading-5 text-rose-700 ring-rose-300/70"
+                inputClassName="h-6 leading-6 text-[13px]"
+                pillRemoveClassName="hover:bg-rose-600/15"
+                animatedPlaceholder
               />
             </Field>
           </div>
@@ -2627,7 +2758,7 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
                 onChange={(e: any) => set("description", e.target.value)}
                 placeholder="Customer reported intermittent reboots when charging…"
                 rows={3}
-                className="min-h-0 h-[103px] border-amber-300 bg-[#FFFDE7] placeholder:text-foreground/50 focus:border-amber-400 focus:ring-amber-300/20 hover:border-amber-400/60"
+                className="min-h-0 h-[103px] border-zinc-900 bg-[#FFFDE7] focus:border-black focus:ring-black/10 hover:border-black"
               />
             </Field>
           </div>
@@ -2638,7 +2769,7 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
                 onChange={(e: any) => set("notes", e.target.value)}
                 placeholder="Visible water damage on bottom left"
                 rows={3}
-                className="min-h-0 h-[82px] border-amber-300 bg-[#FFFDE7] placeholder:text-foreground/50 focus:border-amber-400 focus:ring-amber-300/20 hover:border-amber-400/60"
+                className="min-h-0 h-[82px] border-zinc-900 bg-[#FFFDE7] focus:border-black focus:ring-black/10 hover:border-black"
               />
             </Field>
           </div>
@@ -2779,6 +2910,12 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
       )}
 
       {/* Add Colour dialog — name + colour picker, saved to Device Colours */}
+      <AddTicketOptionDialog
+        field={addJobTypeOpen ? "job_type" : null}
+        initial={addJobTypeName}
+        onClose={() => setAddJobTypeOpen(false)}
+        onAdded={(v) => set("jobType", v)}
+      />
       {showAddColour && (
         <ModalPortal>
         <div className="fixed inset-0 z-[9998] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowAddColour(false)}>
@@ -4357,52 +4494,30 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
 }
 
 /* ---------------- Step 9: Upload ---------------- */
-function UploadStep({ data, setData, onNext, isEdit }: any) {
+function UploadStep({ data, setData, onNext, isEdit, ticketId }: any) {
+  // Edit mode shows the ticket's saved photos alongside new ones (max 3 total).
+  const { photos: existing } = useTicketPhotos(isEdit ? ticketId : null);
   return (
     <div className="rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)] sm:p-8">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {[
-          { id: "camera", label: "Camera", icon: Camera, desc: "Open camera to capture device shots" },
-          { id: "gallery", label: "Gallery", icon: ImageIcon, desc: "Pick existing photos from device" },
-        ].map((s, i) => (
-          <motion.button key={s.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 * i }}
-            onClick={() => setData({ ...data, files: [...data.files, `${s.id}-${Date.now()}.jpg`] })}
-            className="group flex items-center gap-4 rounded-2xl border border-border bg-gradient-to-b from-indigo-50/40 to-white p-5 text-left transition hover:-translate-y-0.5 hover:border-indigo-200"
-          >
-            <span className="grid h-14 w-14 place-items-center rounded-2xl border border-border bg-white text-brand-700 shadow-card"><s.icon className="h-6 w-6" /></span>
-            <div className="flex-1">
-              <p className="font-display text-lg font-bold">{s.label}</p>
-              <p className="text-sm text-muted-foreground">{s.desc}</p>
-            </div>
-            <Upload className="h-4 w-4 text-muted-foreground transition group-hover:text-foreground" />
-          </motion.button>
-        ))}
-      </div>
-      <div className="mt-5">
-        <p className="text-xs font-medium text-muted-foreground">Attached files</p>
-        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {data.files.length === 0 ? (
-            <div className="col-span-full rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">No files yet - add photos or documents above.</div>
-          ) : data.files.map((f: string, i: number) => (
-            <motion.div key={f + i} initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="aspect-[4/3] rounded-xl border border-border bg-gradient-to-br from-indigo-100/50 to-white p-2 shadow-card">
-              <div className="flex h-full items-end justify-between rounded-lg border border-border bg-white p-2">
-                <span className="truncate text-[10px] text-muted-foreground">{f}</span>
-                <FileText className="h-3.5 w-3.5 text-muted-foreground" />
-              </div>
-            </motion.div>
-          ))}
-        </div>
-      </div>
+      <TicketPhotoUploader
+        pending={data.photos}
+        onPendingChange={(photos) => setData({ ...data, photos })}
+        existing={existing}
+        removedIds={data.removedPhotoIds}
+        onRemoveExisting={(id) => setData({ ...data, removedPhotoIds: [...data.removedPhotoIds, id] })}
+      />
       {!isEdit && (
         <div className="mt-6 flex gap-2 justify-end items-center">
-          <Button variant="outline" size="lg" className="h-11 text-[15px]" onClick={onNext}>Skip</Button>
-          <Button size="lg" onClick={onNext}>Upload & Continue <ArrowRight className="h-4 w-4" /></Button>
+          {data.photos.length === 0 ? (
+            <Button variant="outline" size="lg" className="h-11 text-[15px]" onClick={onNext}>Skip</Button>
+          ) : (
+            <Button size="lg" onClick={onNext}>Continue <ArrowRight className="h-4 w-4" /></Button>
+          )}
         </div>
       )}
     </div>
   );
 }
-
 /* ---------------- Step 10: Ticket Confirmation ---------------- */
 function ConfirmationStep({ onSubmit, isEdit, data, isEstimate = false }: { onSubmit: () => void; isEdit: boolean; data: any; isEstimate?: boolean }) {
   const [confirmed, setConfirmed] = useState(false);

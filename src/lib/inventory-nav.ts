@@ -61,7 +61,6 @@ export const INVENTORY_NAV: InvNavSection[] = [
       { href: "/inventory/forecast", label: "Stock Forecast", icon: TrendingUp },
       { href: "/inventory/stock-movement", label: "Stock Transfer", icon: ArrowLeftRight },
       { href: "/inventory/loss-damage", label: "Loss & Damage", icon: ShieldAlert, permission: CAP.lossDamage.view },
-      { href: "/inventory/approvals", label: "Approvals", icon: BadgeCheck },
       { href: "/inventory/stock-count", label: "Stock Audit", icon: ClipboardCheck, permission: CAP.stockAudit.view },
     ],
   },

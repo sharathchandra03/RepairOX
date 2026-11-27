@@ -1,5 +1,6 @@
 "use client";
 
+import { TicketPhotoViewer } from "@/components/tickets/ticket-photo-viewer";
 import { BackPill, BackLink } from "@/components/common/back-pill";
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -11,6 +12,7 @@ import {
   CheckCircle2, Phone, Mail, Building2, MapPin, Shield,
   Package, Hash, Calendar, Tag, CircleDot, Receipt, Ban, GitBranch,
   Ticket as TicketIcon, Stethoscope,
+  Camera,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -198,6 +200,7 @@ export default function TicketDetailPage() {
   const { can } = usePermissions();
   // Per-action ticket capability gates (granular OR backward-compatible coarse).
   const canEditTicket = allow(can, CAP.ticket.edit);
+  const [photoCount, setPhotoCount] = useState(0);
   const canDeleteTicket = allow(can, CAP.ticket.delete);
   const canPushInvoice = allow(can, CAP.ticket.pushToInvoice);
   const canChangeStatus = allow(can, CAP.ticket.changeStatus);
@@ -849,6 +852,22 @@ export default function TicketDetailPage() {
                 </div>
               );
             })()}
+          </DetailSection>
+
+          {/* Device Photos — one large photo at a time with ‹ › arrows,
+              thumbnails and a full-screen viewer (ticket_photos, migration 0130). */}
+          <DetailSection
+            accent="sky"
+            title={`Device Photos${photoCount ? ` (${photoCount})` : ""}`}
+            icon={Camera}
+            id="section-photos"
+          >
+            <TicketPhotoViewer
+              ticketId={ticket.id}
+              canAdd={canEditTicket}
+              canDelete={canEditTicket}
+              onCountChange={setPhotoCount}
+            />
           </DetailSection>
 
           {/* Job Details */}

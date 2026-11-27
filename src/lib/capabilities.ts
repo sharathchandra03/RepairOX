@@ -167,6 +167,8 @@ export const CAP = {
     // Inventory + barcode settings
     inventorySettings: ["settings_inventory_edit", "manage_inventory", "manage_settings"],
     barcode: ["settings_barcode_edit", "manage_settings"],
+    // Device categories (ticket category wheel + Settings → Device Categories)
+    deviceCategoryCreate: ["create_category", "manage_categories", "manage_settings"],
     // Dashboard config
     dashboard: ["settings_dashboard_configure", "edit_dashboard_targets", "manage_settings"],
     // Cross-cutting controls (unchanged)
@@ -221,6 +223,8 @@ export const CAP = {
     delete: ["delete_ticket", "manage_repair_jobs"],
     changeStatus: ["change_ticket_status", "update_repair_status", "manage_repair_jobs"],
     changePriority: ["change_ticket_priority", "edit_ticket", "manage_repair_jobs"],
+    // "+ Add" a Source / Job Type value from the ticket form (migration 0129 RLS mirrors this).
+    addFieldOption: ["create_ticket", "edit_ticket", "manage_repair_jobs", "edit_ticket_settings", "manage_settings"],
     pin: ["pin_ticket", "edit_ticket", "manage_repair_jobs"],
     assign: ["assign_technician", "assign_technicians", "manage_repair_jobs"],
     parts: ["add_parts", "remove_parts", "manage_repair_jobs"],

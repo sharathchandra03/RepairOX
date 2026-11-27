@@ -483,7 +483,7 @@ export default function InvoicePage() {
       node = parent;
     }
     const measure = () => {
-      setWrapH(wrap.offsetHeight);
+      setWrapH(Math.floor(wrap.getBoundingClientRect().height));
       if (bar) setStickyTop(bar.offsetHeight);
     };
     measure();
@@ -696,11 +696,11 @@ export default function InvoicePage() {
       {/* Dashboard — Collapsible Section */}
       <div>
         {/* Dashboard Header with Toggle */}
-        <div className="flex items-center justify-between mb-4">
+        <div className={`flex items-center gap-2 ${dashboardExpanded ? "mb-4" : "mb-0"}`}>
           <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Dashboard Overview</p>
           <button
             onClick={() => setDashboardExpanded((prev) => !prev)}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-border/70 bg-card text-muted-foreground shadow-sm transition-all duration-200 hover:bg-[#EEF1FD] hover:text-[#4361EE] hover:border-[#4361EE]/30 active:scale-95"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-[#2B3553] bg-[#2B3553] text-white shadow-sm transition-all duration-200 hover:bg-[#1B2238] hover:border-[#1B2238] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B3553]/40 active:scale-95"
             aria-label={dashboardExpanded ? "Collapse dashboard" : "Expand dashboard"}
           >
             <motion.span
@@ -843,7 +843,7 @@ export default function InvoicePage() {
       <div
         ref={stickyWrapRef}
         style={{ top: stickyTop }}
-        className="sticky z-10 -mt-6 space-y-6 bg-[hsl(var(--background))] pt-6 pb-6 shadow-[-32px_0_0_0_hsl(var(--background)),32px_0_0_0_hsl(var(--background))]"
+        className="sticky z-10 !mt-3 space-y-3 bg-[hsl(var(--background))] pt-1 pb-3 shadow-[-32px_0_0_0_hsl(var(--background)),32px_0_0_0_hsl(var(--background))]"
       >
       {/* Filter System — shared architecture: Date strip → Status strip → Advanced panel */}
       {/* The date strip defines the width; the status strip stretches to match it
@@ -1020,7 +1020,7 @@ export default function InvoicePage() {
           (not auto) on the inner wrapper — an overflow:auto/hidden ancestor would
           trap the sticky thead and break the freeze. Flat bordered header and
           flat bottom so nothing bleeds through corner gaps while frozen. */}
-      <div className="-mt-6 border-2 border-zinc-300 bg-card shadow-card">
+      <div className="!mt-0 border-2 border-zinc-300 bg-card shadow-card">
         <div className="[overflow-x:clip]">
           <table className="w-full text-sm table-fixed">
             <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#5368D4] border-b-2 border-white/35">
