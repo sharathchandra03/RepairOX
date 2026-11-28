@@ -38,6 +38,8 @@ const config: Config = {
           900: "#1E2B8A",
         },
       },
+      transitionDuration: { 350: "350ms", 400: "400ms" },
+      transitionTimingFunction: { snappy: "cubic-bezier(0.32,0.72,0,1)" },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",

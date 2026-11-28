@@ -1533,7 +1533,7 @@ function ProcessSelector({ value, onChange }: { value?: string; onChange: (id: s
               onClick={() => onChange(card.id)}
               className={cn(
                 "group relative flex flex-col items-center text-center rounded-2xl border p-3 sm:p-4 cursor-pointer",
-                "transition-[background,border-color,box-shadow] duration-[350ms] ease-[cubic-bezier(0.32,0.72,0,1)]",
+                "transition-[background,border-color,box-shadow] duration-350 ease-snappy",
                 "backdrop-blur-sm",
                 // Thin light-black border + thin black shadow to differentiate boxes
                 "border-black/15 shadow-[0_1px_3px_rgba(0,0,0,0.16),0_2px_6px_-2px_rgba(0,0,0,0.12)]",
@@ -1567,7 +1567,7 @@ function ProcessSelector({ value, onChange }: { value?: string; onChange: (id: s
                 className={cn(
                   "relative grid h-12 w-12 place-items-center rounded-full text-white",
                   "bg-gradient-to-br shadow-lg",
-                  "transition-transform duration-[350ms] ease-[cubic-bezier(0.32,0.72,0,1)]",
+                  "transition-transform duration-350 ease-snappy",
                   "group-hover:scale-[1.12]",
                   card.gradient
                 )}
@@ -1577,16 +1577,16 @@ function ProcessSelector({ value, onChange }: { value?: string; onChange: (id: s
               >
                 {card.icon}
                 {/* Sparkle decorations — reveal on hover */}
-                <span className="absolute -top-0.5 -right-0.5 h-2 w-2 text-[#4361EE]/60 opacity-0 group-hover:opacity-100 transition-all duration-[400ms] ease-[cubic-bezier(0.32,0.72,0,1)] group-hover:scale-110 group-hover:-translate-y-0.5 group-hover:translate-x-0.5">
+                <span className="absolute -top-0.5 -right-0.5 h-2 w-2 text-[#4361EE]/60 opacity-0 group-hover:opacity-100 transition-all duration-400 ease-snappy group-hover:scale-110 group-hover:-translate-y-0.5 group-hover:translate-x-0.5">
                   <svg viewBox="0 0 8 8" fill="currentColor"><path d="M4 0l.7 2.3L7 3l-2.3.7L4 6l-.7-2.3L1 3l2.3-.7z" /></svg>
                 </span>
-                <span className="absolute -bottom-0.5 -left-1 h-1.5 w-1.5 text-[#4361EE]/40 opacity-0 group-hover:opacity-100 transition-all duration-[400ms] ease-[cubic-bezier(0.32,0.72,0,1)] group-hover:scale-110 group-hover:translate-y-0.5 group-hover:-translate-x-0.5" style={{ transitionDelay: "60ms" }}>
+                <span className="absolute -bottom-0.5 -left-1 h-1.5 w-1.5 text-[#4361EE]/40 opacity-0 group-hover:opacity-100 transition-all duration-400 ease-snappy group-hover:scale-110 group-hover:translate-y-0.5 group-hover:-translate-x-0.5" style={{ transitionDelay: "60ms" }}>
                   <svg viewBox="0 0 8 8" fill="currentColor"><path d="M4 0l.7 2.3L7 3l-2.3.7L4 6l-.7-2.3L1 3l2.3-.7z" /></svg>
                 </span>
               </span>
 
               {/* Title */}
-              <h3 className="mt-2 text-[13px] font-bold text-zinc-800 tracking-tight transition-colors duration-[350ms] group-hover:text-[#2A3AB8]">{card.title}</h3>
+              <h3 className="mt-2 text-[13px] font-bold text-zinc-800 tracking-tight transition-colors duration-350 group-hover:text-[#2A3AB8]">{card.title}</h3>
 
               {/* Description */}
               <p className="mt-1 text-[11px] text-zinc-500 leading-relaxed max-w-[180px]">{card.desc}</p>
@@ -1595,21 +1595,21 @@ function ProcessSelector({ value, onChange }: { value?: string; onChange: (id: s
               <span
                 className={cn(
                   "mt-2.5 grid h-7 w-7 place-items-center rounded-full",
-                  "transition-all duration-[350ms] ease-[cubic-bezier(0.32,0.72,0,1)]",
+                  "transition-all duration-350 ease-snappy",
                   isSelected
                     ? "bg-[#4361EE] text-white shadow-[0_4px_16px_-2px_rgba(67,97,238,0.5)]"
                     : "bg-[#4361EE] text-white shadow-sm",
                   "group-hover:shadow-[0_6px_20px_-2px_rgba(67,97,238,0.5)] group-hover:scale-[1.15]"
                 )}
               >
-                <ArrowRight className="h-3.5 w-3.5 transition-transform duration-[350ms] ease-[cubic-bezier(0.32,0.72,0,1)] group-hover:translate-x-[3px]" />
+                <ArrowRight className="h-3.5 w-3.5 transition-transform duration-350 ease-snappy group-hover:translate-x-[3px]" />
               </span>
 
               {/* Bottom accent line — animates width on hover */}
               <span
                 className={cn(
                   "absolute bottom-0 left-1/2 -translate-x-1/2 h-[3px] rounded-full",
-                  "transition-all duration-[400ms] ease-[cubic-bezier(0.32,0.72,0,1)]",
+                  "transition-all duration-400 ease-snappy",
                   isSelected ? "w-[calc(100%-2rem)] opacity-100" : "w-[40%] opacity-50 group-hover:w-[calc(100%-2rem)] group-hover:opacity-100"
                 )}
                 style={{

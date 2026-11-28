@@ -544,7 +544,7 @@ export default function PriceListPage() {
             {!globalSearch && (
               <span
                 aria-hidden="true"
-                className="pointer-events-none absolute left-10 top-1/2 z-10 -translate-y-1/2 truncate pr-9 text-sm font-bold text-muted-foreground/70 transition-opacity duration-[400ms] ease-in-out"
+                className="pointer-events-none absolute left-10 top-1/2 z-10 -translate-y-1/2 truncate pr-9 text-sm font-bold text-muted-foreground/70 transition-opacity duration-400 ease-in-out"
                 style={{ opacity: hintVisible ? 1 : 0, maxWidth: "calc(100% - 3.5rem)" }}
               >
                 {SEARCH_HINTS[hintIndex]}
@@ -1745,7 +1745,7 @@ function PartsAndPricing({
             {!search && (
               <span
                 aria-hidden="true"
-                className="pointer-events-none absolute left-9 top-1/2 z-10 -translate-y-1/2 truncate pr-3 text-[13px] text-muted-foreground/70 transition-opacity duration-[400ms] ease-in-out"
+                className="pointer-events-none absolute left-9 top-1/2 z-10 -translate-y-1/2 truncate pr-3 text-[13px] text-muted-foreground/70 transition-opacity duration-400 ease-in-out"
                 style={{ opacity: partHintVisible ? 1 : 0, maxWidth: "calc(100% - 3rem)" }}
               >
                 {PART_SEARCH_HINTS[partHintIndex]}
