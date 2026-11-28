@@ -35,7 +35,14 @@ export interface TicketStatusConfig {
   /** Category of each SYSTEM status. */
   builtins: Partial<Record<TicketStatus, string>>;
   statuses: CustomTicketStatus[];
+  /** Optional per-config colour overrides for the SYSTEM statuses. Used by the
+   *  Warranty config so warranty can recolour a system status without touching
+   *  the Ticket colours (the Ticket config keeps using settings.statusColors). */
+  colors?: Partial<Record<TicketStatus, string>>;
 }
+
+/** Which record family a status config belongs to. */
+export type StatusScope = "ticket" | "warranty";
 
 /** Lifecycle order of the system statuses (also the order inside a category). */
 export const SYSTEM_STATUSES: TicketStatus[] = [
@@ -61,6 +68,20 @@ export const DEFAULT_TICKET_STATUS_CONFIG: TicketStatusConfig = {
   statuses: [],
 };
 
+/** Warranty records start with the SAME layout as tickets, then are edited on
+ *  their own (Settings → Tickets → Warranty Statuses & Categories). */
+export const DEFAULT_WARRANTY_STATUS_CONFIG: TicketStatusConfig = {
+  categories: DEFAULT_TICKET_STATUS_CONFIG.categories.map((c) => ({ ...c })),
+  builtins: { ...DEFAULT_TICKET_STATUS_CONFIG.builtins },
+  statuses: [],
+  colors: {},
+};
+
+/** System-status colours for a config: its own overrides on top of the shared palette. */
+export function effectiveColors(config: TicketStatusConfig, base: Record<string, string>): Record<string, string> {
+  return { ...base, ...(config.colors ?? {}) };
+}
+
 /** Suggested system stage for a new custom status in a category. */
 export function suggestedBase(config: TicketStatusConfig, categoryId: string): TicketStatus {
   const sys = SYSTEM_STATUSES.find((s) => config.builtins[s] === categoryId);
@@ -85,7 +106,12 @@ export function normalizeStatusConfig(raw: unknown): TicketStatusConfig {
     .filter((x): x is CustomTicketStatus => !!x && typeof x.id === "string" && typeof x.name === "string" && SYSTEM_STATUSES.includes(x.base))
     .map((x) => ({ ...x, name: x.name.trim() || "Untitled status", color: HEX.test(x.color) ? x.color : "#71717A",
       categoryId: ids.has(x.categoryId) ? x.categoryId : categories[0].id, active: x.active !== false }));
-  return { categories, builtins, statuses };
+  const colors: Partial<Record<TicketStatus, string>> = {};
+  for (const st of SYSTEM_STATUSES) {
+    const c = r.colors?.[st];
+    if (typeof c === "string" && HEX.test(c)) colors[st] = c;
+  }
+  return { categories, builtins, statuses, colors };
 }
 
 /* ─── Options + display ─────────────────────────────────────────────── */

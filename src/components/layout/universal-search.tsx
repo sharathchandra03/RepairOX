@@ -4,7 +4,7 @@ import { useRef, useState, useEffect, useCallback, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import {
   Search, ChevronDown, Ticket, FileText, Settings, Loader2,
-  Phone, Smartphone, Hash, X,
+  Phone, Smartphone, Hash, X, Footprints,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -13,6 +13,7 @@ import {
   type SearchScope,
   type SearchResult,
   type TicketResult,
+  type WalkInResult,
   type InvoiceResult,
   type SettingsResult,
 } from "@/hooks/use-universal-search";
@@ -20,6 +21,7 @@ import {
   STATUS_LABEL, STATUS_TONE,
   INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE,
   INVOICE_TYPE_LABEL,
+  WALKIN_STATUS_LABEL, WALKIN_STATUS_TONE,
   invoiceStatusPillStyle,
 } from "@/lib/mock-data";
 import { useStoreSettings } from "@/lib/store-settings";
@@ -28,6 +30,7 @@ import { useStoreSettings } from "@/lib/store-settings";
 
 const SCOPE_ICON: Record<SearchScope, typeof Ticket> = {
   tickets: Ticket,
+  walkins: Footprints,
   invoices: FileText,
   settings: Settings,
 };
@@ -105,6 +108,49 @@ function TicketResultRow({ result, query, isActive }: { result: TicketResult; qu
   );
 }
 
+function WalkInResultRow({ result, query, isActive }: { result: WalkInResult; query: string; isActive: boolean }) {
+  const statusLabel = WALKIN_STATUS_LABEL[result.status] ?? result.status;
+  const statusTone = WALKIN_STATUS_TONE[result.status] ?? "bg-zinc-100 text-zinc-600 ring-zinc-200";
+  return (
+    <div className={cn("flex items-start gap-3 px-4 py-3 transition-colors", isActive && "bg-[#4361EE]/5")}>
+      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-600">
+        <Footprints className="h-4 w-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="text-[13px] font-semibold text-zinc-900">
+            <Highlight text={result.displayId} query={query} />
+          </span>
+          <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset", statusTone)}>
+            {statusLabel}
+          </span>
+        </div>
+        <p className="mt-0.5 text-[12px] text-zinc-600 truncate">
+          <Highlight text={result.customer} query={query} />
+          {result.phone && (
+            <span className="text-zinc-400 ml-2">
+              <Highlight text={result.phone} query={query} />
+            </span>
+          )}
+        </p>
+        <div className="mt-1 flex items-center gap-3 text-[11px] text-zinc-500">
+          {result.model && (
+            <span className="flex items-center gap-1">
+              <Smartphone className="h-3 w-3" />
+              <Highlight text={result.model} query={query} />
+            </span>
+          )}
+          {result.source && <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600">{result.source}</span>}
+          {result.date && (
+            <span className="text-zinc-400">
+              {new Date(result.date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 function InvoiceResultRow({ result, query, isActive }: { result: InvoiceResult; query: string; isActive: boolean }) {
   const { settings } = useStoreSettings();
   const statusLabel = INVOICE_STATUS_LABEL[result.status] ?? result.status;
@@ -243,6 +289,8 @@ export function UniversalSearch() {
       // instead of opening the record detail page directly
       if (result.type === "ticket") {
         router.push(`/tickets?search_id=${encodeURIComponent(result.id)}`);
+      } else if (result.type === "walkin") {
+        router.push(`/walk-in?search_id=${encodeURIComponent(result.id)}`);
       } else if (result.type === "invoice") {
         router.push(`/invoice?search_id=${encodeURIComponent(result.id)}`);
       } else {
@@ -287,7 +335,7 @@ export function UniversalSearch() {
           // Cycle scope with Tab (no shift) when panel is open
           if (!e.shiftKey && isOpen && !query) {
             e.preventDefault();
-            const scopes: SearchScope[] = ["tickets", "invoices", "settings"];
+            const scopes: SearchScope[] = ["tickets", "invoices", "walkins", "settings"];
             const idx = scopes.indexOf(scope);
             setScope(scopes[(idx + 1) % scopes.length]);
           }
@@ -448,7 +496,7 @@ export function UniversalSearch() {
               <div className="py-1">
                 {results.map((result, idx) => (
                   <button
-                    key={result.type === "settings" ? result.href : result.id}
+                    key={result.type === "settings" ? result.href : `${result.type}-${result.id}`}
                     id={`search-result-${idx}`}
                     role="option"
                     aria-selected={idx === activeIndex}
@@ -460,6 +508,9 @@ export function UniversalSearch() {
                   >
                     {result.type === "ticket" && (
                       <TicketResultRow result={result} query={query} isActive={idx === activeIndex} />
+                    )}
+                    {result.type === "walkin" && (
+                      <WalkInResultRow result={result} query={query} isActive={idx === activeIndex} />
                     )}
                     {result.type === "invoice" && (
                       <InvoiceResultRow result={result} query={query} isActive={idx === activeIndex} />

@@ -82,7 +82,7 @@ export default function LoginPage() {
   return (
     <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-[hsl(228,30%,95%)] via-[hsl(228,30%,97%)] to-[hsl(228,30%,95%)]">
       {/* Novatrix animated background */}
-      <div className="pointer-events-none absolute inset-0 opacity-[0.18]">
+      <div className="pointer-events-none absolute inset-0 isolate opacity-[0.3]">
         <Novatrix
           color={[0.76, 0.78, 0.98]}
           speed={0.28}
@@ -90,6 +90,8 @@ export default function LoginPage() {
           mouseReact={false}
           className="h-full w-full"
         />
+        {/* recolour the shader's pink/lavender hues to the brand blue (keeps the motion) */}
+        <div className="absolute inset-0 bg-[#4361EE] mix-blend-color" />
       </div>
       {/* Decorative background */}
       <div className="pointer-events-none absolute inset-0 bg-grid-faint opacity-40 [mask-image:radial-gradient(ellipse_at_center,black_30%,transparent_75%)]" />
@@ -199,13 +201,13 @@ export default function LoginPage() {
             </div>
 
             <h2 className="font-display text-4xl font-extrabold tracking-tight">Welcome Back</h2>
-            <p className="mt-2 text-sm text-muted-foreground">
+            <p className="mt-2.5 text-[15px] leading-relaxed text-zinc-700">
               Access your tickets, notes and projects anytime, anywhere - and keep everything flowing in one place.
             </p>
 
-            <form onSubmit={onSubmit} className="mt-8 space-y-4">
+            <form onSubmit={onSubmit} className="lg-form mt-8 space-y-4">
               <div className="space-y-1.5">
-                <Label htmlFor="email">Your email</Label>
+                <Label htmlFor="email" className="text-[13px] font-semibold text-zinc-800">Your email</Label>
                 <Input
                   id="email"
                   type="email"
@@ -218,8 +220,8 @@ export default function LoginPage() {
               </div>
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="password">Password</Label>
-                  <Link href="#" className="text-xs font-medium text-brand-700 hover:underline">Forgot?</Link>
+                  <Label htmlFor="password" className="text-[13px] font-semibold text-zinc-800">Password</Label>
+                  <Link href="#" className="text-[13px] font-semibold text-brand-700 hover:underline">Forgot?</Link>
                 </div>
                 <Input
                   id="password"
@@ -251,7 +253,7 @@ export default function LoginPage() {
                 </div>
               )}
 
-              <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none">
+              <label className="flex items-center gap-2 text-[13px] font-medium text-zinc-700 cursor-pointer select-none">
                 <Checkbox checked={remember} onChange={setRemember} aria-label="Remember me on this device" />
                 Remember me on this device
               </label>
@@ -261,23 +263,27 @@ export default function LoginPage() {
                 <ArrowRight className="h-4 w-4" />
               </Button>
 
-              <div className="relative my-2">
-                <div className="h-px bg-border" />
-                <span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-background px-3 text-[11px] uppercase tracking-wider text-muted-foreground">
-                  Or continue with
-                </span>
+              <div className="flex items-center gap-3 py-1">
+                <span className="h-px flex-1 bg-gradient-to-r from-transparent to-zinc-300" />
+                <span className="text-[11.5px] font-semibold uppercase tracking-[0.14em] text-zinc-600">Or continue with</span>
+                <span className="h-px flex-1 bg-gradient-to-l from-transparent to-zinc-300" />
               </div>
 
-              <Button type="button" variant="outline" size="xl" className="w-full">
-                <span className="inline-flex h-5 w-5 items-center justify-center rounded-sm bg-white shadow-ring">
+              <Button
+                type="button"
+                variant="outline"
+                size="xl"
+                className="group w-full border-zinc-300 bg-white font-semibold shadow-[0_6px_18px_-12px_rgba(40,60,160,0.45)] transition duration-200 hover:-translate-y-0.5 hover:border-[#4361EE]/50 hover:bg-white hover:shadow-[0_14px_28px_-14px_rgba(67,97,238,0.55)]"
+              >
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white shadow-ring transition duration-200 group-hover:scale-110">
                   <GoogleG />
                 </span>
                 Continue with Google
               </Button>
 
-              <p className="pt-2 text-center text-sm text-muted-foreground">
+              <p className="pt-3 text-center text-[14px] font-medium text-zinc-700">
                 Don&apos;t have an account?{" "}
-                <Link href="#" className="font-semibold text-brand-700 hover:underline">Sign Up</Link>
+                <Link href="#" className="font-bold text-brand-700 underline-offset-4 hover:underline">Sign Up</Link>
               </p>
 
             </form>

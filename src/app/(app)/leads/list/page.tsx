@@ -2436,19 +2436,28 @@ export default function LeadsListPage() {
               iconLeft={<Search className="h-4 w-4" />}
             />
           </div>
-          <div className="hidden shrink-0 items-center gap-2 sm:flex">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Customer</span>
-            <SegmentedTabs
-              value={filters.customerLink}
-              onChange={(v) => setFilters((f) => ({ ...f, customerLink: v as LeadFilters["customerLink"] }))}
-              options={[
-                { label: "All", value: "any" },
-                { label: "New", value: "new" },
-                { label: "Existing", value: "existing" },
-              ]}
-              size="sm"
-            />
+        <div className="flex shrink-0 items-center gap-2">
+          {!controlsCollapsed && (<Button
+            variant={showFilters || activeFilters ? "soft" : "outline"}
+            size="sm"
+            className="shrink-0 gap-1.5 rounded-full"
+            onClick={() => setShowFilters((v) => !v)}
+            aria-expanded={showFilters}
+          >
+            <Filter className="h-3.5 w-3.5" /> Filters
+            {appliedChips.length > 0 && (
+              <span className="grid h-4 min-w-4 place-items-center rounded-full bg-[#4361EE] px-1 text-[10px] font-bold text-white">
+                {appliedChips.length}
+              </span>
+            )}
+          </Button>)}
+          {/* Table-layout controls — desktop grid only. Customize (reorder)
+              and Freeze are two SEPARATE per-user preferences. */}
+          <div className="hidden items-center gap-2 md:flex">
+            <CustomizeColumnsMenu columns={orderedColumns} state={columnOrder} />
+            <FreezeColumnsMenu columns={orderedColumns} state={frozen} independent />
           </div>
+        </div>
           {/* The ONE Collapse/Expand control. */}
           <WorkspaceCollapseBar
             collapsed={controlsCollapsed}
@@ -2593,32 +2602,23 @@ export default function LeadsListPage() {
                 counts={ncCounts}
               />
             )}
+          <div className="hidden shrink-0 items-center gap-2 sm:flex">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Customer</span>
+            <SegmentedTabs
+              value={filters.customerLink}
+              onChange={(v) => setFilters((f) => ({ ...f, customerLink: v as LeadFilters["customerLink"] }))}
+              options={[
+                { label: "All", value: "any" },
+                { label: "New", value: "new" },
+                { label: "Existing", value: "existing" },
+              ]}
+              size="sm"
+            />
+          </div>
           </div>
           {view === "assigned" && (
             <p className="mt-1 px-1 text-[11px] text-muted-foreground">Filtering by assigned date &amp; time ({orgTz}).</p>
           )}
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Button
-            variant={showFilters || activeFilters ? "soft" : "outline"}
-            size="sm"
-            className="shrink-0 gap-1.5 rounded-full"
-            onClick={() => setShowFilters((v) => !v)}
-            aria-expanded={showFilters}
-          >
-            <Filter className="h-3.5 w-3.5" /> Filters
-            {appliedChips.length > 0 && (
-              <span className="grid h-4 min-w-4 place-items-center rounded-full bg-[#4361EE] px-1 text-[10px] font-bold text-white">
-                {appliedChips.length}
-              </span>
-            )}
-          </Button>
-          {/* Table-layout controls — desktop grid only. Customize (reorder)
-              and Freeze are two SEPARATE per-user preferences. */}
-          <div className="hidden items-center gap-2 md:flex">
-            <CustomizeColumnsMenu columns={orderedColumns} state={columnOrder} />
-            <FreezeColumnsMenu columns={orderedColumns} state={frozen} independent />
-          </div>
         </div>
       </div>
 

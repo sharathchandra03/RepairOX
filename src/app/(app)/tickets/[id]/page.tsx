@@ -22,7 +22,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { QuickEditDrawer } from "@/components/ui/quick-edit-drawer";
 import { Drawer } from "@/components/ui/drawer";
 import { ModalPortal } from "@/components/ui/modal-portal";
-import { statusGroups, resolveStatus } from "@/lib/ticket-status-config";
+import { statusGroups, resolveStatus, effectiveColors, type StatusScope } from "@/lib/ticket-status-config";
 import { ResolvedStatusPill } from "@/components/tickets/resolved-status-pill";
 import { StatusPillDropdown } from "@/components/tickets/inline-status-dropdown";
 import { useStore } from "@/lib/store";
@@ -331,6 +331,10 @@ export default function TicketDetailPage() {
   // keeping every existing section (Customer / Device / Job) intact.
   const warranty = ticket ? isWarranty(ticket) : false;
   const warrantyStatus: WarrantyStatus = ticket?.warrantyStatus ?? "open";
+  // Warranty records use their own status layout (Settings → Tickets → Warranty Statuses).
+  const statusScope: StatusScope = ticket && isWarranty(ticket) ? "warranty" : "ticket";
+  const statusCfg = statusScope === "warranty" ? settings.warrantyStatusConfig : settings.ticketStatusConfig;
+  const statusPalette = statusScope === "warranty" ? effectiveColors(statusCfg, settings.statusColors) : settings.statusColors;
   // The ORIGINAL ticket this warranty claim was raised against (bidirectional
   // navigation, spec §7).
   const parentTicket = useMemo(
@@ -553,7 +557,7 @@ export default function TicketDetailPage() {
                     {ESTIMATE_STATUS_LABEL[estimateStatus]}
                   </span>
                 ) : (
-                  <ResolvedStatusPill status={ticket.status} statusId={ticket.statusId} className="px-2.5 py-1" />
+                  <ResolvedStatusPill status={ticket.status} statusId={ticket.statusId} scope={statusScope} className="px-2.5 py-1" />
                 )}
                 {ticket.priority !== "normal" && (
                   <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset ${PRIORITY_TONE[ticket.priority]}`}>
@@ -811,6 +815,7 @@ export default function TicketDetailPage() {
                             statusId={dev.statusId}
                             onSelect={(next, id) => updateDeviceStatus(ticket.id, dev.id, next, id)}
                             statusColors={settings.statusColors}
+                            scope={statusScope}
                             hasInvoice={invoices.some((inv) => inv.ticketId === ticket.id)}
                             size="sm"
                             ariaLabel={[dev.brand, dev.model].filter(Boolean).join(" ") || "Device"}
@@ -891,7 +896,7 @@ export default function TicketDetailPage() {
               </div>
               <div>
                 <p className="text-[11px] font-medium text-muted-foreground mb-1">Status</p>
-                <ResolvedStatusPill status={ticket.status} statusId={ticket.statusId} className="px-2.5 py-0.5" />
+                <ResolvedStatusPill status={ticket.status} statusId={ticket.statusId} scope={statusScope} className="px-2.5 py-0.5" />
               </div>
               <DetailField label="Estimated Cost" value={formatINR(ticket.amount)} />
               <DetailField label="Created" value={fmtDate(ticket.createdAt)} />
@@ -1311,6 +1316,7 @@ export default function TicketDetailPage() {
                     statusId={ticket.statusId}
                     onSelect={(v, id) => handleStatusChange(v, id)}
                     statusColors={settings.statusColors}
+                    scope={statusScope}
                     hasInvoice={!!linkedInvoice}
                     size="md"
                   />
@@ -1452,12 +1458,12 @@ export default function TicketDetailPage() {
             <p className="text-sm font-bold mb-1">Change Status</p>
             <p className="text-[11px] text-muted-foreground mb-4">Ticket {ticket.id}</p>
             <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-1">
-              {statusGroups(settings.ticketStatusConfig, settings.statusColors).map((g) => (
+              {statusGroups(statusCfg, statusPalette).map((g) => (
                 <div key={g.category.id} className="space-y-1.5">
                   <div className="flex items-center gap-2"><span className="h-px flex-1 bg-border" /><span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{g.category.name}</span><span className="h-px flex-1 bg-border" /></div>
                   {g.options.map((o) => {
                     const isBlocked = o.status === "repaired_collected" && !linkedInvoice && ticket.status !== "repaired_collected";
-                    const cur = resolveStatus(ticket.status, ticket.statusId, settings.ticketStatusConfig, settings.statusColors);
+                    const cur = resolveStatus(ticket.status, ticket.statusId, statusCfg, statusPalette);
                     const active = o.status === ticket.status && (o.statusId ?? undefined) === (cur.statusId ?? undefined);
                     return (
                       <button key={o.key} disabled={isBlocked}

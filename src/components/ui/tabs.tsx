@@ -16,6 +16,8 @@ interface TabsProps {
 }
 export function SegmentedTabs({ options, value, onChange, className, size = "md", accent = "blue", fill = false }: TabsProps) {
   const amber = accent === "amber";
+  // unique per strip: identical option sets on one page must not share the sliding pill
+  const uid = React.useId();
   return (
     <div
       role="tablist"
@@ -44,7 +46,7 @@ export function SegmentedTabs({ options, value, onChange, className, size = "md"
           >
             {active && (
               <motion.span
-                layoutId={`pill-${options.map((x) => x.value).join("-")}`}
+                layoutId={`pill-${uid}`}
                 className={cn(
                   "absolute inset-0 rounded-full",
                   amber

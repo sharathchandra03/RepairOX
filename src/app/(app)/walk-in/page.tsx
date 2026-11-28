@@ -14,7 +14,7 @@
    ────────────────────────────────────────────────────────────────────────── */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   Plus, Download, Upload, Search, Eye, Pencil, MoreHorizontal, Trash2,
@@ -36,6 +36,7 @@ import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Drawer } from "@/components/ui/drawer";
 import { SegmentedTabs } from "@/components/ui/tabs";
+import { ScrollHint } from "@/components/common/scroll-hint";
 import { Pagination } from "@/components/ui/pagination";
 import { DateRangePicker } from "@/components/filters/date-range-picker";
 import { PinnedFilterBar, type PinnableFilterDef } from "@/components/tickets/pinned-filter-bar";
@@ -115,6 +116,36 @@ export default function WalkInPage() {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [showFilters, setShowFilters] = useState(false);
+  // Universal Search → show a single record when opened from the top-bar search
+  const searchParams = useSearchParams();
+  const [searchFilterId, setSearchFilterId] = useState<string | null>(null);
+  useEffect(() => {
+    const id = searchParams.get("search_id");
+    if (!id) return;
+    setSearchFilterId(id);
+    // Clear every other filter so the single record is always visible
+    setView("table");
+    setQ("");
+    setTypeFilter("all");
+    setSourceFilter("all");
+    setStatusFilter("all");
+    setSalesFilter("all");
+    setFollowUpFilter("all");
+    setFollowUpAttemptFilter("all");
+    setFollowUpOutcomeFilter("all");
+    setIssueFilter("all");
+    setConversionFilter("all");
+    setDateRange("all");
+    setCustomFrom("");
+    setCustomTo("");
+    setStoreFilter([]);
+  }, [searchParams]);
+  const clearSearchFilter = useCallback(() => {
+    setSearchFilterId(null);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("search_id");
+    window.history.replaceState({}, "", url.pathname);
+  }, []);
 
   /* ─── Sticky frozen workspace (view switch + filters + search + table header) ──
      The top block (tabs, date pills, filters, search) pins just below the app
@@ -191,6 +222,7 @@ export default function WalkInPage() {
 
   /* ── The single filtered dataset (table + report share this) ── */
   const filtered = useMemo(() => {
+    if (searchFilterId) return walkIns.filter((w) => w.id === searchFilterId);
     const rows = walkIns.filter((w) => {
       if (!matchesStoreSelection(w.branchId, storeFilter)) return false;
       if (!isWalkInInDateRange(w.date, dateRange, customFrom, customTo)) return false;
@@ -239,7 +271,7 @@ export default function WalkInPage() {
     const pinned = ordered.filter((w) => w.pinnedAt);
     const normal = ordered.filter((w) => !w.pinnedAt);
     return [...pinned, ...normal];
-  }, [walkIns, storeFilter, dateRange, customFrom, customTo, typeFilter, sourceFilter, statusFilter, salesFilter, followUpFilter, followUpAttemptFilter, followUpOutcomeFilter, issueFilter, conversionFilter, q]);
+  }, [walkIns, storeFilter, dateRange, customFrom, customTo, typeFilter, sourceFilter, statusFilter, salesFilter, followUpFilter, followUpAttemptFilter, followUpOutcomeFilter, issueFilter, conversionFilter, q, searchFilterId]);
 
   /* Dataset for the Follow-Up view. It is synced with the top date strip, but
      the range applies to the FOLLOW-UP date (not the walk-in creation date) —
@@ -627,7 +659,7 @@ export default function WalkInPage() {
   const activeFollowUpCount = useMemo(() => walkIns.filter((w) => hasActiveFollowUp(w)).length, [walkIns]);
 
   return (
-    <div className="space-y-6 rox-lock-root">
+    <div className="flex flex-col gap-3 rox-lock-root">
       <PageHeader
         eyebrow="Shop"
         title="Walk-In"
@@ -687,10 +719,21 @@ export default function WalkInPage() {
       <div
         ref={stickyWrapRef}
         style={{ top: stickyTop }}
-        className="sticky z-10 -mt-5 space-y-5 bg-[hsl(var(--background))] pt-5 pb-5 shadow-[-32px_0_0_0_hsl(var(--background)),32px_0_0_0_hsl(var(--background))]"
+        className="sticky z-10 space-y-3 bg-[hsl(var(--background))] pt-0 pb-3 shadow-[-32px_0_0_0_hsl(var(--background)),32px_0_0_0_hsl(var(--background))]"
       >
       {/* View switch: Table / Report */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex min-w-0 items-center gap-3">
+        {/* Date-range strip (shared by table + report) — on the SAME line as the
+            view switch; scrolls inside its own frame when the row is narrow. */}
+        <ScrollHint framed className="min-w-0 flex-initial">
+          <SegmentedTabs
+            value={dateRange}
+            onChange={(v) => setDateRange(v as WalkInDateRange)}
+            options={WALKIN_DATE_RANGES.map((r) => ({ label: r.label, value: r.value }))}
+            size="sm"
+            className="border-0 bg-transparent p-0"
+          />
+        </ScrollHint>
         <SegmentedTabs
           value={view}
           onChange={(v) => setView(v as "table" | "report" | "followup")}
@@ -721,10 +764,17 @@ export default function WalkInPage() {
             },
           ]}
           size="sm"
-          className="[&>button]:px-3"
+          className="shrink-0 [&>button]:px-3"
+        />
+        <DateRangePicker
+          open={dateRange === "custom"}
+          from={customFrom}
+          to={customTo}
+          onFromChange={(v) => { setCustomFrom(v); setDateRange("custom"); }}
+          onToChange={(v) => { setCustomTo(v); setDateRange("custom"); }}
         />
         {view !== "report" && (
-          <div className="flex items-center gap-2">
+          <div className="ml-auto flex shrink-0 items-center gap-2">
             <WalkInFollowUpBell
               walkIns={walkIns}
               displayId={walkInDisplayId}
@@ -735,32 +785,9 @@ export default function WalkInPage() {
             {/* RIGHT-SIDE utility group — Store filter → Search, kept on the
                 SAME top row (right side), matching the Tickets reference. */}
             <StoreMultiSelect value={storeFilter} onChange={setStoreFilter} />
-            <TableSearch value={q} onChange={setQ} placeholder="Search walk-ins…" className="w-56" />
+            <TableSearch value={q} onChange={setQ} placeholder="Search walk-ins…" className="w-40 2xl:w-56" />
           </div>
         )}
-      </div>
-
-      {/* Date-range strip (shared by table + report) — matches the Tickets/Invoice
-          8-option strip exactly for visual uniformity across modules. */}
-      <div className="space-y-2">
-        {/* Date-range strip as ONE connected segmented control (RepairOX
-            standard: all filter strips use the connected SegmentedTabs
-            container, never detached pills). */}
-        <div className="max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-          <SegmentedTabs
-            value={dateRange}
-            onChange={(v) => setDateRange(v as WalkInDateRange)}
-            options={WALKIN_DATE_RANGES.map((r) => ({ label: r.label, value: r.value }))}
-            size="sm"
-          />
-        </div>
-        <DateRangePicker
-          open={dateRange === "custom"}
-          from={customFrom}
-          to={customTo}
-          onFromChange={(v) => { setCustomFrom(v); setDateRange("custom"); }}
-          onToChange={(v) => { setCustomTo(v); setDateRange("custom"); }}
-        />
       </div>
 
       {/* Pinned filters bar — the filters the user chose to keep visible. */}
@@ -839,6 +866,31 @@ export default function WalkInPage() {
           <button onClick={() => setSelected(new Set())} className="ml-1 text-xs text-muted-foreground hover:text-foreground">Clear</button>
         </motion.div>
       )}
+      {/* Search Filter Banner — shown when navigated from Universal Search */}
+      {searchFilterId && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex items-center justify-between rounded-xl border border-[#4361EE]/20 bg-[#4361EE]/5 px-4 py-3"
+        >
+          <div className="flex items-center gap-2">
+            <Search className="h-4 w-4 text-[#4361EE]" />
+            <span className="text-sm font-medium text-[#4361EE]">
+              Showing search result:{" "}
+              <span className="font-bold">
+                {(() => { const w = walkIns.find((x) => x.id === searchFilterId); return w ? walkInDisplayId(w) : searchFilterId; })()}
+              </span>
+            </span>
+          </div>
+          <button
+            onClick={clearSearchFilter}
+            className="inline-flex items-center gap-1.5 rounded-full bg-[#4361EE]/10 px-3 py-1.5 text-xs font-semibold text-[#4361EE] transition hover:bg-[#4361EE]/20 active:scale-95"
+          >
+            <X className="h-3 w-3" />
+            Show All Walk-Ins
+          </button>
+        </motion.div>
+      )}
       </div>
       {/* ── END STICKY FROZEN WORKSPACE ── */}
 
@@ -909,7 +961,7 @@ export default function WalkInPage() {
                 <col className="w-[26%]" />{/* Name (+ contact underneath) — flexible; wide enough for a full +91 number on one line */}
                 <col className="w-[28%]" />{/* Model (+ issue underneath) — flexible, absorbs the removed Issue column */}
                 <col className="w-[150px]" />{/* Follow-Up — wide enough for "2nd Follow-Up · Today" */}
-                <col className="w-[136px]" />{/* Final Status — N/A / Lost / Converted Ticket */}
+                <col className="w-[152px]" />{/* Final Status — N/A / Lost / Converted Ticket */}
                 <col className="w-[140px]" />{/* Action — fixed so the 3 icons never collapse/wrap */}
               </colgroup>
               <thead style={{ top: 0 }} className="sticky z-[5] bg-[#5368D4] border-b-2 border-white/35">
@@ -930,8 +982,8 @@ export default function WalkInPage() {
                   <th className="pl-2 py-4"><span className="inline-block pl-[8px]">Name</span></th>
                   <th className="pl-4 py-4">Model</th>
                   <th className="pl-[3px] py-4">Follow-Up</th>
-                  <th className="pl-[5px] py-4">Final Status</th>
-                  <th className="px-4 py-4 text-right">Action</th>
+                  <th className="px-2 py-4 text-center">Final Status</th>
+                  <th className="px-4 py-4 text-center">Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -1108,7 +1160,7 @@ export default function WalkInPage() {
                           the Walk-In is converted into a Ticket.
                         • Lost is set via the explicit "Lost Customer" workflow.
                         • N/A reopens a previously-lost Walk-In (back to active). */}
-                    <td className="py-4 pr-4 pl-0 [&>*:first-child]:-ml-[4px]" onClick={(e) => e.stopPropagation()}>
+                    <td className="px-2 py-4" onClick={(e) => e.stopPropagation()}>
                       <WalkInFinalStatusCell
                         walkIn={w}
                         canChange={canFinalStatus}
@@ -1119,7 +1171,7 @@ export default function WalkInPage() {
                       />
                     </td>
                     <td className="px-4 py-4">
-                      <div className="flex items-center justify-end gap-1">
+                      <div className="flex items-center justify-center gap-1">
                         {/* Push to Ticket — sibling of the ticket's "Push to Invoice"
                             quick action. Reflects a linked/converted state so no
                             duplicate ticket is created. */}
@@ -1373,10 +1425,12 @@ function WalkInFinalStatusCell({
   // Won — static, with the linked ticket number. Never reversible from here.
   if (fs === "won") {
     return (
-      <div>
+      <div className="relative mx-auto w-fit">
+        {/* The pill alone sets the cell height (so it lines up with the neighbouring
+            pills); the linked ticket number hangs underneath without pushing it up. */}
         {pill(false)}
         {w.linkedTicketId && (
-          <p className="mt-1 text-[12px] font-semibold text-indigo-700">→ {ticketNoFor(w.linkedTicketId)}</p>
+          <p className="absolute left-0 top-full mt-1.5 whitespace-nowrap text-[12px] font-semibold leading-none text-indigo-700">→ {ticketNoFor(w.linkedTicketId)}</p>
         )}
       </div>
     );
@@ -1384,12 +1438,13 @@ function WalkInFinalStatusCell({
 
   // Without the final-status capability the outcome is READ-ONLY — a static
   // pill with no dropdown (UI = capability).
-  if (!canChange) return pill(false);
+  if (!canChange) return <div className="flex justify-center">{pill(false)}</div>;
 
   // Active (N/A or In Pipeline) → the two selectable outcomes: Won + Lost.
   const isActive = fs === "na" || fs === "pipeline";
 
   return (
+    <div className="flex justify-center">
     <Dropdown
       align="left"
       width="w-48"
@@ -1436,6 +1491,7 @@ function WalkInFinalStatusCell({
         </>
       )}
     </Dropdown>
+    </div>
   );
 }
 

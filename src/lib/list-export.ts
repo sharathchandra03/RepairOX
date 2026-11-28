@@ -11,7 +11,7 @@
 import { downloadXLSX, downloadCSV, toCSV } from "@/lib/csv-utils";
 import {
   STATUS_LABEL, PRIORITY_LABEL, TICKET_TYPE_LABEL,
-  ESTIMATE_STATUS_LABEL, WARRANTY_STATUS_LABEL,
+  ESTIMATE_STATUS_LABEL,
   INVOICE_STATUS_LABEL, INVOICE_TYPE_LABEL, PROFORMA_STATUS_LABEL,
   getRecordType, getTicketType, getTicketDevices,
   getDocumentType, getInvoiceDevices,
@@ -34,7 +34,6 @@ const fmtDate = (iso?: string): string => {
 function ticketStatusLabel(t: Ticket): string {
   const rt = getRecordType(t);
   if (rt === "estimate") return ESTIMATE_STATUS_LABEL[t.estimateStatus ?? "waiting_approval"] ?? "";
-  if (rt === "warranty") return WARRANTY_STATUS_LABEL[t.warrantyStatus ?? "open"] ?? "";
   return STATUS_LABEL[t.status] ?? t.status ?? "";
 }
 

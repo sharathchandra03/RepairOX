@@ -6,7 +6,9 @@ import { SettingsPage, SettingsSection } from "@/components/settings/settings-pa
 import { useStoreSettings } from "@/lib/store-settings";
 import { usePermissions } from "@/lib/permissions-context";
 import { useStore } from "@/lib/store";
-import { normalizeStatusConfig, type TicketStatusConfig } from "@/lib/ticket-status-config";
+import { normalizeStatusConfig, effectiveColors, SYSTEM_STATUSES, type TicketStatusConfig } from "@/lib/ticket-status-config";
+import { isWarranty } from "@/lib/mock-data";
+import { SegmentedTabs } from "@/components/ui/tabs";
 import { TicketStatusManager } from "@/components/settings/ticket-status-manager";
 import { ColumnSettingsPanel } from "@/components/tickets/column-settings-panel";
 import {
@@ -27,22 +29,27 @@ export default function TicketSettingsPage() {
   const [saving, setSaving] = useState(false);
 
   const [statusConfig, setStatusConfig] = useState<TicketStatusConfig>(settings.ticketStatusConfig);
+  // Warranty records have their own categories / custom statuses / system-status colours.
+  const [warrantyConfig, setWarrantyConfig] = useState<TicketStatusConfig>(settings.warrantyStatusConfig);
+  const [statusScope, setStatusScope] = useState<"ticket" | "warranty">("ticket");
   // Custom statuses used on any ticket/device can't be deleted (only switched off).
   const { tickets } = useStore();
-  const usedStatusIds = useMemo(() => {
+  const { usedStatusIds, usedWarrantyStatusIds } = useMemo(() => {
     const ids = new Set<string>();
+    const wIds = new Set<string>();
     for (const t of tickets) {
-      if (t.statusId) ids.add(t.statusId);
-      for (const d of t.devices ?? []) if (d.statusId) ids.add(d.statusId);
+      const target = isWarranty(t) ? wIds : ids;
+      if (t.statusId) target.add(t.statusId);
+      for (const d of t.devices ?? []) if (d.statusId) target.add(d.statusId);
     }
-    return ids;
+    return { usedStatusIds: ids, usedWarrantyStatusIds: wIds };
   }, [tickets]);
   const handleSave = useCallback(() => {
     if (!canManage) return;
     setSaving(true);
-    updateSettings({ statusColors: colors, ticketStatusConfig: normalizeStatusConfig(statusConfig) });
+    updateSettings({ statusColors: colors, ticketStatusConfig: normalizeStatusConfig(statusConfig), warrantyStatusConfig: normalizeStatusConfig(warrantyConfig) });
     setTimeout(() => setSaving(false), 400);
-  }, [canManage, colors, statusConfig, updateSettings]);
+  }, [canManage, colors, statusConfig, warrantyConfig, updateSettings]);
 
   /* ── Column Settings ──────────────────────────────────────────────────
      Reads the shared, persisted config (single source of truth) and writes it
@@ -98,11 +105,29 @@ export default function TicketSettingsPage() {
     >
       <SettingsSection
         title="Statuses & Categories"
-        description="Group ticket statuses into categories, add your own statuses and pick their colours. The status dropdown on tickets follows this layout."
+        description="Group statuses into categories, add your own statuses and pick their colours. Tickets and Warranty records each have their own layout, and their status dropdowns follow it."
         icon={Palette}
       >
-        <TicketStatusManager config={statusConfig} onChange={setStatusConfig} colors={colors} onColorsChange={setColors}
-          usedIds={usedStatusIds} disabled={!canManage} />
+        <div className="mb-4">
+          <SegmentedTabs
+            size="sm"
+            value={statusScope}
+            onChange={(v) => setStatusScope(v as "ticket" | "warranty")}
+            options={[{ label: "Tickets", value: "ticket" }, { label: "Warranty", value: "warranty" }]}
+          />
+        </div>
+        {statusScope === "ticket" ? (
+          <TicketStatusManager config={statusConfig} onChange={setStatusConfig} colors={colors} onColorsChange={setColors}
+            usedIds={usedStatusIds} disabled={!canManage} />
+        ) : (
+          <TicketStatusManager key="warranty" config={warrantyConfig} onChange={setWarrantyConfig}
+            colors={effectiveColors(warrantyConfig, colors)}
+            onColorsChange={(c) => setWarrantyConfig((w) => ({
+              ...w,
+              colors: Object.fromEntries(SYSTEM_STATUSES.filter((st) => c[st] && c[st] !== colors[st]).map((st) => [st, c[st]])),
+            }))}
+            usedIds={usedWarrantyStatusIds} disabled={!canManage} />
+        )}
       </SettingsSection>
       <SettingsSection
         title="Column Settings"

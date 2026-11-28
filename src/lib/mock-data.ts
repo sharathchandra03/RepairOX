@@ -779,6 +779,10 @@ export const navItems: NavItem[] = [
   { href: "/employees/payroll",        label: "Payroll & Salary",   icon: "Banknote", permission: "manage_payments" },
   { href: "/employees/salary-advances", label: "Salary Advances",  icon: "WalletCards", permission: "manage_payments" },
 
+  // Admin Hub — ONE sidebar entry that opens the Employees + Accounts area
+  // (its own sidebar, like Inventory). The route forwards to the first page the
+  // user may open; the sub-pages stay defined in `expandableNavGroups` below.
+  { href: "/admin-hub", label: "People & Finance", icon: "Briefcase", permission: ["manage_users", "assign_technicians", "manage_roles", "manage_payments", "view_financial_reports"] },
   // Administration — single entry point for all employee access / role management
   { href: "/settings/roles-permissions", label: "Roles & Permissions", icon: "ShieldCheck", permission: ["manage_roles", "manage_users"] },
 
@@ -2119,7 +2123,7 @@ export const navGroups: Record<WorkspaceId, { label: string; items: string[] }[]
     // Roles & Permissions has moved to Settings → Roles & Permissions.
     // Employees + Accounts (incl. Payments and Expenses) render here as
     // expandable groups.
-    { label: "ADMINISTRATION", items: [] },
+    { label: "ADMINISTRATION", items: ["/admin-hub"] },
     { label: "GENERAL",        items: ["/activity", "/reports", "/settings"] },
   ],
   operations: [

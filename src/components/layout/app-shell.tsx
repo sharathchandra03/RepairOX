@@ -4,7 +4,10 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { Sidebar, MobileSidebar } from "./sidebar";
 import { InventorySidebar } from "@/components/inventory/inventory-sidebar";
 import { isInventoryPath } from "@/lib/inventory-nav";
+import { AdminSidebar } from "@/components/layout/admin-sidebar";
+import { isAdminPath } from "@/lib/admin-nav";
 import { ChromeThemeApplier } from "@/components/layout/chrome-theme-applier";
+import { EmptyCellAligner } from "@/components/common/empty-cell-aligner";
 import { Topbar } from "./topbar";
 import { motion } from "framer-motion";
 import { usePathname, useRouter } from "next/navigation";
@@ -217,6 +220,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           the "RepairOX menu" pill. */}
       {isInventoryPath(pathname) ? (
         <InventorySidebar />
+      ) : isAdminPath(pathname) ? (
+        // Admin Hub (Employees + Accounts) — same pattern as Inventory.
+        <AdminSidebar />
       ) : (
         <Sidebar
           collapsed={collapsed}
@@ -232,7 +238,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         setActiveWorkspace={setActiveWorkspace}
       />
       <div className="flex min-w-0 flex-1 flex-col overflow-y-auto [overscroll-behavior:none]">
-        <div className="sticky top-0 z-20">
+        <div className="sticky top-0 z-[35]">
           <PreviewBanner />
           <DemoBanner />
           <Topbar
@@ -256,6 +262,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </motion.main>
       </div>
       <ChromeThemeApplier />
+      <EmptyCellAligner />
       <InternalChat open={chatOpen} onOpenChange={setChatOpen} />
     </div>
     </ReportContextProvider>

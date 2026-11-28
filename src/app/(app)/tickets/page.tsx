@@ -22,8 +22,9 @@ import { DeviceCard } from "@/components/common/device-card";
 import { usePermissions } from "@/lib/permissions-context";
 import { CAP, allow } from "@/lib/capabilities";
 import { toast } from "@/components/ui/toaster";
-import { TableUtilityBar } from "@/components/common/table-utility-bar";
-import { matchesStoreSelection } from "@/components/common/store-multi-select";
+import { TableSearch } from "@/components/common/table-utility-bar";
+import { ScrollHint } from "@/components/common/scroll-hint";
+import { StoreMultiSelect, matchesStoreSelection } from "@/components/common/store-multi-select";
 import { EmptyStateCharacter } from "@/components/common/empty-state-character";
 import { TicketActionsMenu, type TicketAction } from "@/components/tickets/ticket-actions-menu";
 import { DueDateCell } from "@/components/tickets/due-date-cell";
@@ -35,7 +36,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ModalPortal } from "@/components/ui/modal-portal";
 import { DeviceDetailsOverlay } from "@/components/tickets/device-details-overlay";
 import { Pagination } from "@/components/ui/pagination";
-import { STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, type TicketStatus, type Ticket, type TicketPriority, getTicketDevices, getTicketType, ticketInvoiceCoverage, type TicketInvoiceCoverage, getRecordType, isEstimate, isWarranty, ESTIMATE_STATUS_LABEL, ESTIMATE_STATUS_TONE, ESTIMATE_STATUS_OPTIONS, WARRANTY_STATUS_LABEL, WARRANTY_STATUS_TONE, WARRANTY_STATUS_OPTIONS, type RecordType, type WarrantyStatus } from "@/lib/mock-data";
+import { STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, type TicketStatus, type Ticket, type TicketPriority, getTicketDevices, getTicketType, ticketInvoiceCoverage, type TicketInvoiceCoverage, getRecordType, isEstimate, isWarranty, ESTIMATE_STATUS_LABEL, ESTIMATE_STATUS_TONE, ESTIMATE_STATUS_OPTIONS, type RecordType, type WarrantyStatus } from "@/lib/mock-data";
 import { PushToInvoiceDialog } from "@/components/tickets/push-to-invoice-dialog";
 import { parseIssueString } from "@/lib/issue-library";
 import { useStore } from "@/lib/store";
@@ -54,7 +55,6 @@ import { usePdfDownload } from "@/hooks/use-pdf-download";
 import { BulkDownloadDialog } from "@/components/download/bulk-download-dialog";
 import { readDateFilterParams, isInListDateRange } from "@/lib/date-filter";
 import { InlineStatusDropdown, StatusPillDropdown } from "@/components/tickets/inline-status-dropdown";
-import { WarrantyStatusPillDropdown } from "@/components/tickets/warranty-status-dropdown";
 import { exportTicketsExcel, exportTicketsCSV } from "@/lib/list-export";
 
 /* ─── Column Definition ──────────────────────────────────────────────────
@@ -390,19 +390,31 @@ export default function TicketsPage() {
     // locked to the wrapper's live bottom edge the whole way down and up.
     const writeVar = () => {
       if (!page) return;
-      const barH = bar ? bar.offsetHeight : stickyTop;
-      const hH = header ? header.offsetHeight : 0;
-      const wH = wrap.offsetHeight;
+      // Sub-pixel heights (offsetHeight rounds to whole px, which drifts at browser zoom)
+      const barH = bar ? bar.getBoundingClientRect().height : stickyTop;
+      const hH = header ? header.getBoundingClientRect().height : 0;
+      const wH = wrap.getBoundingClientRect().height;
       page.style.setProperty("--rox-thead-top", `${barH + hH + wH}px`);
+      // Real distance between the topbar's bottom edge and this page's top edge
+      // (the shell's top padding at any density / zoom). The page header cancels
+      // exactly this amount, so every sticky block RESTS where it pins and nothing
+      // shifts by a few px when scrolling starts.
+      // Use the shell's layout padding, NOT a bounding rect: the page fades/slides in
+      // (transform) when it mounts, and a rect measured mid-animation is off by that
+      // slide distance, which is exactly what made the table jump when scrolling began.
+      const main = page.closest(".rox-page-main") as HTMLElement | null;
+      if (main) {
+        page.style.setProperty("--rox-page-offset", getComputedStyle(main).paddingTop);
+      }
     };
     // Commit the measured heights to React state too — used by the sticky
     // wrapper `top` offsets (header + workspace). These only need to be correct
     // AT REST, so they are debounced to avoid per-frame re-renders during the
     // animation (the thead `top` no longer depends on them — the CSS var does).
     const commit = () => {
-      setWrapH(wrap.offsetHeight);
-      if (header) setHeaderH(header.offsetHeight);
-      if (bar) setStickyTop(bar.offsetHeight);
+      setWrapH(wrap.getBoundingClientRect().height);
+      if (header) setHeaderH(header.getBoundingClientRect().height);
+      if (bar) setStickyTop(bar.getBoundingClientRect().height);
     };
     let settleId: ReturnType<typeof setTimeout> | undefined;
     const onResize = () => {
@@ -446,12 +458,10 @@ export default function TicketsPage() {
   // matches the corresponding field (estimateStatus / warrantyStatus / status).
   const statusFilterLabel =
     recordTypeFilter === "estimate" ? "Estimate Status"
-    : recordTypeFilter === "warranty" ? "Warranty Status"
     : "Status";
   const statusFilterOptions = useMemo(() => {
     const base =
       recordTypeFilter === "estimate" ? ESTIMATE_STATUS_OPTIONS
-      : recordTypeFilter === "warranty" ? WARRANTY_STATUS_OPTIONS
       : STATUS_OPTIONS;
     return [{ label: "All Statuses", value: "all" }, ...base.map((s) => ({ label: s.label, value: s.value as string }))];
   }, [recordTypeFilter]);
@@ -551,9 +561,7 @@ export default function TicketsPage() {
           statusFilter === "all" ||
           (rt === "estimate"
             ? (t.estimateStatus ?? "waiting_approval") === statusFilter
-            : rt === "warranty"
-              ? (t.warrantyStatus ?? "open") === statusFilter
-              : t.status === statusFilter);
+            : t.status === statusFilter);
         const okDate = isInListDateRange(t.createdAt, dateRange, customFrom, customTo);
         const okPriority =
           priorityFilter === "all" ||
@@ -684,15 +692,17 @@ export default function TicketsPage() {
   }, [selected, bulkUpdateStatus, tickets, deductPartsForTicket]);
 
   /* Action handler */
-  // Inline warranty CLAIM status change (Open → In Progress → Completed →
-  // Rejected). Distinct from the device repair status; persists via updateTicket
-  // (JSONB envelope) and reflects everywhere the record is shown.
-  const handleWarrantyStatusChange = useCallback((ticketId: string, status: WarrantyStatus) => {
-    updateTicket(ticketId, { warrantyStatus: status });
-  }, [updateTicket]);
-
   const handleInlineStatusChange = useCallback((ticketId: string, status: TicketStatus, statusId?: string) => {
-    updateTicket(ticketId, { status, statusId });
+    const target = tickets.find((tk) => tk.id === ticketId);
+    // A warranty record also carries a claim lifecycle (Open / In Progress /
+    // Completed / Rejected) used by the Warranty page, the detail view and
+    // exports. Keep it in step with the repair status chosen here.
+    const claim: WarrantyStatus | undefined = target && isWarranty(target)
+      ? (status === "repaired" || status === "repaired_collected" ? "completed"
+        : status === "return" || status === "return_collected" ? "rejected"
+        : "in_progress")
+      : undefined;
+    updateTicket(ticketId, claim ? { status, statusId, warrantyStatus: claim } : { status, statusId });
     // Deduct parts when repaired
     if (status === "repaired") {
       const t = tickets.find((tk) => tk.id === ticketId);
@@ -839,7 +849,10 @@ export default function TicketsPage() {
   return (
     <div
       ref={pageRef}
-      className="space-y-5"
+      // Explicit flex column instead of `space-y-5`: the global compact-density rule
+      // re-writes every `space-y-*` sibling margin, which fought the sticky header
+      // geometry below and made the table jump a few px when scrolling began.
+      className="flex flex-col"
       // Sensible initial value so the sticky thead has a valid `top` before the
       // measure effect runs (overwritten live by the ResizeObserver). Defaults
       // to topbar + header + a typical filter-wrapper height.
@@ -855,7 +868,7 @@ export default function TicketsPage() {
       <div
         ref={headerWrapRef}
         style={{ top: stickyTop }}
-        className="sticky z-20 -mt-5 bg-[hsl(var(--background))] pt-5 pb-5 shadow-[-32px_0_0_0_hsl(var(--background)),32px_0_0_0_hsl(var(--background))]"
+        className="sticky z-20 -mt-[var(--rox-page-offset,20px)] bg-[hsl(var(--background))] pt-5 pb-5 shadow-[-32px_0_0_0_hsl(var(--background)),32px_0_0_0_hsl(var(--background))]"
       >
       <PageHeader
         eyebrow="Shop"
@@ -917,7 +930,7 @@ export default function TicketsPage() {
       <div
         ref={stickyWrapRef}
         style={{ top: workspaceTop }}
-        className={`sticky z-10 -mt-5 bg-[hsl(var(--background))] pt-5 shadow-[-32px_0_0_0_hsl(var(--background)),32px_0_0_0_hsl(var(--background))] ${controlsCollapsed ? "space-y-0 pb-2" : "space-y-5 pb-5"}`}
+        className={`sticky z-10 bg-[hsl(var(--background))] pt-0 shadow-[-32px_0_0_0_hsl(var(--background)),32px_0_0_0_hsl(var(--background))] ${controlsCollapsed ? "space-y-0 pb-2" : "space-y-3 pb-3"}`}
       >
       {/* Date Range — stays ALWAYS visible (never collapses), on the same row as
           the ONE Collapse/Expand control (top-right). The date strip + the
@@ -933,6 +946,18 @@ export default function TicketsPage() {
             onChange={(v) => setDateRange(v as DateRange)}
             options={DATE_RANGES.map((dr) => ({ label: dr.label, value: dr.value }))}
             size="sm"
+          />
+        </div>
+        {/* Store → Search utility group (standard order), sitting on the date row */}
+        <div className="flex shrink-0 items-center gap-2">
+          <StoreMultiSelect value={storeFilter} onChange={setStoreFilter} />
+          <TableSearch
+            value={q}
+            onChange={setQ}
+            placeholder="Search tickets…"
+            animatedPrefix="Search by "
+            animatedWords={["ticket no", "customer", "device", "issue", "phone"]}
+            className="w-56"
           />
         </div>
         <WorkspaceCollapseBar collapsed={controlsCollapsed} onToggle={workspace.toggle} />
@@ -956,7 +981,7 @@ export default function TicketsPage() {
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
             className="overflow-hidden"
           >
-            <div className="space-y-5">
+            <div className="space-y-3">
       {/* Custom Date Range — reuses the same Date Range picker pattern as Invoice */}
       <DateRangePicker
         open={dateRange === "custom"}
@@ -1116,48 +1141,32 @@ export default function TicketsPage() {
         )}
       </AnimatePresence>
 
-      {/* Status Filters (left) + Store filter & Search (right utility area).
-          Uses the shared REPAIROX TABLE UTILITY BAR — the canonical Store→Search
-          group. This Tickets layout is the visual/interaction reference. */}
-      <TableUtilityBar
-        storeValue={storeFilter}
-        onStoreChange={setStoreFilter}
-        searchValue={q}
-        onSearchChange={setQ}
-        searchPlaceholder="Search tickets…"
-        searchAnimatedPrefix="Search by "
-        searchAnimatedWords={["ticket no", "customer", "device", "issue", "phone"]}
-        searchClassName="w-56"
-        left={
+      {/* Line 2 — Status strip + Record-Type strip share one row (the date strip is line 1).
+          The status strip scrolls inside its frame (ScrollHint) if the row is too narrow. */}
+      <div className="flex min-w-0 items-center gap-3">
+        <ScrollHint framed className="min-w-0 flex-initial">
           <SegmentedTabs
             value={statusFilter}
             onChange={setStatusFilter}
             options={STATUS_FILTERS.map((f) => ({ label: f.label, value: f.value as string }))}
             size="sm"
-            className="[&>button]:px-3"
+            className="border-0 bg-transparent p-0 [&>button]:px-3"
           />
-        }
-      />
-
-      {/* Record-Type Strip — All / Ticket / Estimate / Warranty. Sits BELOW the
-          Status strip. Uses the SAME pill styling as the Date strip so it reads
-          as one consistent filter language. Composes with every existing filter
-          (works immediately, no pinning needed). */}
-      <div className="max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-        <SegmentedTabs
-          value={recordTypeFilter}
-          onChange={(v) => {
-            setRecordTypeFilter(v);
-            // The status vocabulary differs per record type, so a status chosen
-            // for one type would be meaningless (and hide every row) under
-            // another. Reset it to "All Statuses" on any switch.
-            setStatusFilter("all");
-          }}
-          options={RECORD_TYPE_FILTERS.map((rt) => ({ label: rt.label, value: rt.value }))}
-          size="sm"
-        />
+        </ScrollHint>
+        {/* Record type — All / Ticket / Estimate / Warranty. Composes with every other filter. */}
+        <div className="shrink-0 px-0.5 py-1">
+          <SegmentedTabs
+            value={recordTypeFilter}
+            onChange={(v) => {
+              setRecordTypeFilter(v);
+              // The status vocabulary differs per record type; reset so no row is hidden.
+              setStatusFilter("all");
+            }}
+            options={RECORD_TYPE_FILTERS.map((rt) => ({ label: rt.label, value: rt.value }))}
+            size="sm"
+          />
+        </div>
       </div>
-
       {/* Bulk selection bar — sits ABOVE the table header as its own row. */}
       {someSelected && (
         <motion.div
@@ -1237,7 +1246,7 @@ export default function TicketsPage() {
           already fits its container, so clipping never hides columns. */}
       {/* Straight (square) card — flat bordered header and flat bottom, so
           nothing bleeds through corner gaps while the header is frozen. */}
-      <div className="hidden -mt-5 border-2 border-zinc-300 bg-card shadow-card md:block">
+      <div className="hidden -mt-[2px] border-2 border-zinc-300 bg-card shadow-card md:block">
         <div className="[overflow-x:clip]">
           <table className="w-full text-sm table-fixed">
             <thead style={{ top: "var(--rox-thead-top)" }} className="sticky z-[5] bg-[#5368D4] border-b-2 border-white/35">
@@ -1302,7 +1311,7 @@ export default function TicketsPage() {
                         col.align === "right" && "text-right",
                         col.align === "center" && "text-center"
                       )}>
-                        {renderCell(col.id, t, isSelected, isWaiting, elapsed, hasMultiItems, () => toggleOne(t.id), handleAction, handleInlineStatusChange, settings.statusColors, coverageFor(t), setDeviceDetailsTicket, (id, section) => router.push(`/tickets/${id}?section=${section}`), updateDeviceStatus, getStore(t.branchId), t.convertedTicketId ? tickets.find((x) => x.id === t.convertedTicketId)?.ticketNo : undefined, canPushToTicket, handleWarrantyStatusChange)}
+                        {renderCell(col.id, t, isSelected, isWaiting, elapsed, hasMultiItems, () => toggleOne(t.id), handleAction, handleInlineStatusChange, settings.statusColors, coverageFor(t), setDeviceDetailsTicket, (id, section) => router.push(`/tickets/${id}?section=${section}`), updateDeviceStatus, getStore(t.branchId), t.convertedTicketId ? tickets.find((x) => x.id === t.convertedTicketId)?.ticketNo : undefined, canPushToTicket)}
                       </td>
                     ))}
                   </motion.tr>
@@ -1315,7 +1324,7 @@ export default function TicketsPage() {
       </div>
 
       {/* Mobile cards */}
-      <div className="grid grid-cols-1 gap-3 md:hidden">
+      <div className="mt-[var(--rox-density-section-gap,1.25rem)] grid grid-cols-1 gap-3 md:hidden">
         {paged.map((t, i) => {
           const elapsed = getElapsedMins(t.createdAt);
           const isWaiting = isOverdue(t);
@@ -1347,11 +1356,7 @@ export default function TicketsPage() {
                     </div>
                   </div>
                 </div>
-                {isWarranty(t) ? (
-                  <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset", WARRANTY_STATUS_TONE[t.warrantyStatus ?? "open"])}>
-                    {WARRANTY_STATUS_LABEL[t.warrantyStatus ?? "open"]}
-                  </span>
-                ) : isEstimate(t) ? (
+                {isEstimate(t) ? (
                   <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset", ESTIMATE_STATUS_TONE[t.estimateStatus ?? "waiting_approval"])}>
                     {ESTIMATE_STATUS_LABEL[t.estimateStatus ?? "waiting_approval"]}
                   </span>
@@ -1641,7 +1646,6 @@ function renderCell(
    *  "Push to Ticket" quick action). */
   canPushToTicket?: boolean,
   /** Change a Warranty record's claim status inline from its status pill. */
-  onWarrantyStatusChange?: (ticketId: string, status: WarrantyStatus) => void,
 ) {
   switch (colId) {
     case "store":
@@ -1751,23 +1755,10 @@ function renderCell(
       );
     }
     case "status": {
-      // ── Warranty records show their OWN claim lifecycle (Open / In Progress /
-      //    Completed / Rejected), NOT the device repair status. This is the
-      //    operational Warranty status, distinct from eligibility (spec §24). ──
-      if (isWarranty(t)) {
-        const ws = t.warrantyStatus ?? "open";
-        // Warranty claims get an INLINE status dropdown (Open → In Progress →
-        // Completed → Rejected), nudged 15px right so it reads as a distinct
-        // claim-lifecycle control, set apart from the repair-status dropdowns.
-        return (
-          <div className="flex flex-col items-start gap-0.5 pl-[15px]">
-            <WarrantyStatusPillDropdown
-              status={ws}
-              onSelect={(next) => onWarrantyStatusChange?.(t.id, next)}
-            />
-          </div>
-        );
-      }
+      // Warranty records use the SAME configurable status control as tickets
+      // (Settings → Tickets → Statuses & Categories), so every system + custom
+      // status and its category shows up here too. The claim lifecycle
+      // (warrantyStatus) is kept in sync from it — see handleInlineStatusChange.
       // ── Estimate records show their OWN outcome status (Waiting for Approval
       //    / Converted Ticket / Lost Customer), NOT the device repair lifecycle.
       //    These are conceptually different (see design §12). Rendered as a
@@ -1832,7 +1823,7 @@ function renderCell(
       // A warranty service is ₹0 and never invoiced (spec §21/§22) — show the
       // amount plainly with no Billing navigation.
       if (isWarranty(t)) {
-        return <span className="font-semibold tabular-nums whitespace-nowrap text-muted-foreground">{formatINR(t.amount)}</span>;
+        return <span className="font-semibold tabular-nums whitespace-nowrap">{formatINR(t.amount)}</span>;
       }
       return (
         <button

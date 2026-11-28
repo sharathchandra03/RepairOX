@@ -1,8 +1,8 @@
 "use client";
-
 import { motion, AnimatePresence } from "framer-motion";
-import { X } from "lucide-react";
-import { useEffect } from "react";
+import { X, ArrowRight } from "lucide-react";
+import Link from "next/link";
+import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { ModalPortal } from "@/components/ui/modal-portal";
 
@@ -20,6 +20,9 @@ export function InfoModal({
   description,
   features,
   statusBadge,
+  image,
+  href,
+  activeIndex,
 }: {
   open: boolean;
   onClose: () => void;
@@ -28,7 +31,15 @@ export function InfoModal({
   description: string;
   features: ModuleFeature[];
   statusBadge?: { label: string; tone: "live" | "preview" };
+  /** Optional module photo shown on the header's right edge. */
+  image?: string;
+  /** Optional CTA that opens the module. */
+  href?: string;
+  /** Feature to spotlight (when opened by clicking one of its icons). */
+  activeIndex?: number | null;
 }) {
+  const activeRef = useRef<HTMLLIElement>(null);
+
   useEffect(() => {
     const onEsc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     if (open) {
@@ -41,109 +52,165 @@ export function InfoModal({
     };
   }, [open, onClose]);
 
+  // bring the spotlighted feature into view once the modal has animated in
+  useEffect(() => {
+    if (!open || activeIndex == null) return;
+    const t = setTimeout(() => activeRef.current?.scrollIntoView({ block: "center", behavior: "smooth" }), 380);
+    return () => clearTimeout(t);
+  }, [open, activeIndex]);
+
   return (
     <ModalPortal>
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[9998] grid place-items-center bg-zinc-900/55 p-4 backdrop-blur-sm"
-          onClick={onClose}
-        >
+      <AnimatePresence>
+        {open && (
           <motion.div
-            initial={{ scale: 0.96, opacity: 0, y: 12 }}
-            animate={{ scale: 1, opacity: 1, y: 0 }}
-            exit={{ scale: 0.96, opacity: 0, y: 12 }}
-            transition={{ type: "spring", stiffness: 300, damping: 26 }}
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="modal-title"
-            className="relative w-full max-w-2xl overflow-hidden rounded-3xl bg-card shadow-2xl ring-1 ring-zinc-900/10"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[9998] grid place-items-center bg-[#0F1640]/60 p-4 backdrop-blur-md"
+            onClick={onClose}
           >
-            {/* close */}
-            <button
-              onClick={onClose}
-              aria-label="Close"
-              className="absolute right-4 top-4 z-10 grid h-9 w-9 place-items-center rounded-full bg-white/90 text-zinc-600 shadow-card ring-1 ring-zinc-200 backdrop-blur transition hover:bg-white hover:text-zinc-900"
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 28, rotateX: 8 }}
+              animate={{ scale: 1, opacity: 1, y: 0, rotateX: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 16 }}
+              transition={{ type: "spring", stiffness: 260, damping: 24 }}
+              style={{ transformPerspective: 1200 }}
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="modal-title"
+              className="relative w-full max-w-2xl overflow-hidden rounded-3xl border-2 border-[#4361EE]/25 bg-card shadow-[0_40px_90px_-30px_rgba(30,45,140,0.7)]"
             >
-              <X className="h-4 w-4" />
-            </button>
+              {/* close */}
+              <button
+                onClick={onClose}
+                aria-label="Close"
+                className="group absolute right-4 top-4 z-20 grid h-9 w-9 place-items-center rounded-full bg-white/95 text-zinc-700 shadow-card ring-1 ring-zinc-200 transition duration-200 hover:rotate-90 hover:bg-white hover:text-[#4361EE]"
+              >
+                <X className="h-4 w-4" />
+              </button>
 
-            {/* header */}
-            <div className="relative overflow-hidden bg-gradient-to-br from-indigo-50 via-indigo-50/60 to-white px-7 pb-6 pt-7">
-              <div className="pointer-events-none absolute inset-0 bg-grid-faint opacity-25" />
-              <div className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full bg-indigo-200/30 blur-3xl" />
-              <div className="relative">
-                {eyebrow && (
-                  <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-brand-700">
-                    {eyebrow}
-                  </p>
+              {/* header */}
+              <div className="relative overflow-hidden bg-[linear-gradient(135deg,#4361EE_0%,#2F45C4_100%)] px-8 pb-7 pt-8 text-white">
+                {image && (
+                  <>
+                    <img
+                      src={image}
+                      alt=""
+                      aria-hidden
+                      className="pointer-events-none absolute inset-y-0 right-0 h-full w-[48%] object-cover opacity-50 [mask-image:linear-gradient(to_left,black_20%,transparent)]"
+                    />
+                  </>
                 )}
-                <div className="flex flex-wrap items-center gap-3">
-                  <h2
-                    id="modal-title"
-                    className="font-display text-2xl font-extrabold tracking-tight md:text-3xl"
-                  >
-                    {title}
-                  </h2>
-                  {statusBadge && (
-                    <span
-                      className={cn(
-                        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1",
-                        statusBadge.tone === "live"
-                          ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
-                          : "bg-amber-50 text-amber-700 ring-amber-200"
-                      )}
+                <div className="relative">
+                  {eyebrow && (
+                    <motion.p
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.1 }}
+                      className="mb-2 text-[11.5px] font-semibold uppercase tracking-[0.16em] text-white/75"
                     >
+                      {eyebrow}
+                    </motion.p>
+                  )}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <motion.h2
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.15 }}
+                      id="modal-title"
+                      className="font-display text-3xl font-extrabold tracking-tight md:text-[34px]"
+                    >
+                      {title}
+                    </motion.h2>
+                    {statusBadge && (
                       <span
                         className={cn(
-                          "h-1.5 w-1.5 rounded-full",
-                          statusBadge.tone === "live" ? "bg-emerald-500" : "bg-amber-500 animate-pulse"
+                          "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1",
+                          statusBadge.tone === "live"
+                            ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+                            : "bg-amber-50 text-amber-700 ring-amber-200"
                         )}
-                      />
-                      {statusBadge.label}
-                    </span>
-                  )}
-                </div>
-                <p className="mt-2 max-w-xl text-sm text-zinc-700">{description}</p>
-              </div>
-            </div>
-
-            {/* features */}
-            <div className="max-h-[58vh] overflow-y-auto px-7 pb-7 pt-6">
-              <p className="mb-3.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-                What&apos;s inside
-              </p>
-              <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {features.map((f, i) => {
-                  const Icon = f.icon;
-                  return (
-                    <motion.li
-                      key={i}
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 0.04 * i }}
-                      className="flex items-start gap-3 rounded-xl border border-zinc-200 bg-white p-3.5 transition hover:border-indigo-200 hover:bg-indigo-50/30"
-                    >
-                      <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-indigo-50 text-brand-700 ring-1 ring-indigo-100">
-                        <Icon className="h-4 w-4" />
+                      >
+                        {statusBadge.label}
                       </span>
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold leading-tight">{f.label}</p>
-                        <p className="mt-0.5 text-xs text-zinc-500">{f.desc}</p>
-                      </div>
-                    </motion.li>
-                  );
-                })}
-              </ul>
-            </div>
+                    )}
+                  </div>
+                  <motion.p
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 0.25 }}
+                    className="mt-2.5 max-w-md text-[14.5px] leading-relaxed text-white/85"
+                  >
+                    {description}
+                  </motion.p>
+                </div>
+              </div>
+
+              {/* features */}
+              <div className="max-h-[52vh] overflow-y-auto px-7 pb-5 pt-6">
+                <div className="mb-4 flex items-center gap-3">
+                  <p className="text-[11.5px] font-bold uppercase tracking-[0.16em] text-zinc-600">
+                    What&apos;s inside
+                  </p>
+                  <span className="h-px flex-1 bg-gradient-to-r from-zinc-300 to-transparent" />
+                  <span className="text-[11.5px] font-semibold text-[#4361EE]">{features.length} features</span>
+                </div>
+                <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {features.map((f, i) => {
+                    const Icon = f.icon;
+                    const active = activeIndex === i;
+                    return (
+                      <motion.li
+                        key={i}
+                        ref={active ? activeRef : undefined}
+                        initial={{ opacity: 0, y: 18, scale: 0.96 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        transition={{ delay: 0.2 + 0.05 * i, type: "spring", stiffness: 260, damping: 22 }}
+                        className={cn(
+                          "lg-sweep group relative flex cursor-default items-start gap-3.5 rounded-2xl border-2 bg-white p-3.5 transition duration-200 hover:-translate-y-0.5 hover:border-[#4361EE]/60 hover:shadow-[0_14px_28px_-16px_rgba(67,97,238,0.6)]",
+                          active ? "border-[#4361EE] shadow-[0_0_0_4px_rgba(67,97,238,0.14)]" : "border-zinc-200"
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-xl ring-1 transition duration-200 group-hover:-rotate-6 group-hover:scale-110 group-hover:bg-[#4361EE] group-hover:text-white group-hover:ring-[#4361EE]",
+                            active ? "bg-[#4361EE] text-white ring-[#4361EE]" : "bg-brand-50 text-brand-700 ring-brand-200"
+                          )}
+                        >
+                          <Icon className="h-[18px] w-[18px]" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[14px] font-semibold leading-tight transition-colors group-hover:text-[#4361EE]">{f.label}</p>
+                          <p className="mt-1 text-[12.5px] leading-snug text-zinc-600">{f.desc}</p>
+                        </div>
+                        <span className="text-[11px] font-bold tabular-nums text-zinc-300 transition-colors group-hover:text-[#4361EE]/70">
+                          {String(i + 1).padStart(2, "0")}
+                        </span>
+                      </motion.li>
+                    );
+                  })}
+                </ul>
+              </div>
+
+              {/* footer CTA */}
+              {href && (
+                <div className="flex items-center justify-between gap-4 border-t border-zinc-200 bg-[#F6F8FF] px-7 py-4">
+                  <p className="text-[13px] font-medium text-zinc-600">Ready to jump in?</p>
+                  <Link
+                    href={href}
+                    className="group inline-flex items-center gap-2 rounded-full brand-gradient px-5 py-2 text-sm font-semibold text-white shadow-glow transition hover:shadow-[0_10px_26px_-8px_rgba(67,97,238,0.8)] active:scale-95"
+                  >
+                    Open {title}
+                    <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
+                  </Link>
+                </div>
+              )}
+            </motion.div>
           </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+        )}
+      </AnimatePresence>
     </ModalPortal>
   );
 }

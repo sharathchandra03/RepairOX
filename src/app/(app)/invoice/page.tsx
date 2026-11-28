@@ -15,6 +15,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
 import { Can } from "@/components/common/can";
+import { ScrollHint } from "@/components/common/scroll-hint";
 import { StoreMultiSelect, matchesStoreSelection } from "@/components/common/store-multi-select";
 import { TableSearch } from "@/components/common/table-utility-bar";
 import { StoreContextCell } from "@/components/common/store-context-cell";
@@ -845,39 +846,33 @@ export default function InvoicePage() {
         style={{ top: stickyTop }}
         className="sticky z-10 !mt-3 space-y-3 bg-[hsl(var(--background))] pt-1 pb-3 shadow-[-32px_0_0_0_hsl(var(--background)),32px_0_0_0_hsl(var(--background))]"
       >
-      {/* Filter System — shared architecture: Date strip → Status strip → Advanced panel */}
-      {/* The date strip defines the width; the status strip stretches to match it
-          exactly so its right edge aligns with the "Custom" pill. */}
-      <div className="w-fit max-w-full space-y-5 overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-        {/* Date Range Strip (always visible) — 8 options as ONE connected
-            segmented control (RepairOX standard: all filter strips use the
-            connected SegmentedTabs container, never detached pills). */}
-        <SegmentedTabs
-          value={dateRange}
-          onChange={(v) => setDateRange(v as DateRange)}
-          options={DATE_RANGES.map((dr) => ({ label: dr.label, value: dr.value }))}
-          size="sm"
-        />
-
-      </div>
-
-      {/* Status pills (left) + Store filter → Search (right), on ONE full-width
-          row so the utility group pins to the page's right edge, matching the
-          Tickets / Walk-In top row exactly. */}
-      <div className="flex w-full flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <SegmentedTabs
-          value={statusFilter}
-          onChange={setStatusFilter}
-          options={STATUS_FILTERS.map((f) => ({ label: f.label, value: f.value as string }))}
-          size="sm"
-          className="[&>button]:px-3"
-        />
-        <div className="flex shrink-0 items-center gap-2">
+      {/* ONE line: Date strip → Status strip … Store → Search (pinned right).
+          The status strip is the flexible part: when the screen is narrow it
+          scrolls inside its own frame (ScrollHint) instead of wrapping to a
+          second line, so the row always stays a single line. */}
+      <div className="flex w-full min-w-0 items-center gap-3">
+        <div className="shrink-0 px-0.5 py-1">
+          <SegmentedTabs
+            value={dateRange}
+            onChange={(v) => setDateRange(v as DateRange)}
+            options={DATE_RANGES.map((dr) => ({ label: dr.label, value: dr.value }))}
+            size="sm"
+          />
+        </div>
+        <ScrollHint framed className="min-w-0 flex-initial">
+          <SegmentedTabs
+            value={statusFilter}
+            onChange={setStatusFilter}
+            options={STATUS_FILTERS.map((f) => ({ label: f.label, value: f.value as string }))}
+            size="sm"
+            className="border-0 bg-transparent p-0 [&>button]:px-3"
+          />
+        </ScrollHint>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           <StoreMultiSelect value={storeFilter} onChange={setStoreFilter} />
-          <TableSearch value={q} onChange={setQ} placeholder="Search invoices…" animatedPrefix="Search by " animatedWords={["invoice ID", "customer", "company", "phone", "ticket no"]} className="w-56" />
+          <TableSearch value={q} onChange={setQ} placeholder="Search invoices…" animatedPrefix="Search by " animatedWords={["invoice ID", "customer", "company", "phone", "ticket no"]} className="w-44 xl:w-56" />
         </div>
       </div>
-
       {/* Custom Date Range — reuses the shared Date Range picker (same as Tickets) */}
       <DateRangePicker
         open={dateRange === "custom"}

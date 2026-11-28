@@ -10,7 +10,7 @@ import {
   CalendarDays, UserPlus, Map, BookUser, Package, Wrench,
   ClipboardCheck, Truck, Receipt, Activity, ChevronDown,
   UsersRound, BookOpen, Landmark, FolderTree, Banknote, WalletCards, ShieldCheck,
-  IndianRupee, ReceiptIndianRupee, Building2, Trophy, Lightbulb, LayoutGrid, Clock,
+  IndianRupee, ReceiptIndianRupee, Building2, Trophy, Lightbulb, LayoutGrid, Clock, Briefcase,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/ui/logo";
@@ -22,7 +22,8 @@ import { type WorkspaceId } from "@/lib/permissions";
 import { usePermissions } from "@/lib/permissions-context";
 import { type VisibilityMode } from "@/lib/feature-visibility";
 
-const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+export const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  Briefcase,
   Home, Ticket, FileText, Boxes, Users, Recycle, ClipboardList,
   Store, Wallet, Settings, BarChart3, Map, BookUser, Package,
   Wrench, ClipboardCheck, Truck, Receipt, Activity,
@@ -406,12 +407,9 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
         {groups.map((group) => {
           const items = group.items.map((href) => itemMap[href]).filter(visibleItem).filter((item) => featureVisible(item.href));
           // For ADMINISTRATION group, also render expandable groups
-          const isAdminGroup = group.label === "ADMINISTRATION";
-          const visibleExpandables = isAdminGroup
-            ? expandableGroups.filter(visibleExpandableGroup).filter((eg) =>
-                eg.children.some((c) => visibleItem(c) && featureVisible(c.href))
-              )
-            : [];
+          // Employees + Accounts no longer expand here: the single "Admin Hub"
+          // entry opens them in their own sidebar (see admin-sidebar.tsx).
+          const visibleExpandables: ExpandableNavGroup[] = [];
 
           if (items.length === 0 && visibleExpandables.length === 0) return null;
           return (
@@ -519,7 +517,7 @@ export function MobileSidebar({ open, setOpen, activeWorkspace, setActiveWorkspa
             {/* Nav */}
             <ThinScroll className="px-3 pb-4">
               {groups.map((group) => {
-                const items = group.items.map((href) => itemMap[href]).filter(visibleItem).filter((item) => featureVisible(item.href));
+                const items = group.items.map((href) => itemMap[href]).filter(visibleItem).filter((item) => featureVisible(item.href)).filter((item) => item.href !== "/admin-hub");
                 const isAdminGroup = group.label === "ADMINISTRATION";
                 const visibleExpandables = isAdminGroup
                   ? expandableGroups.filter(visibleExpandableGroup).filter((eg) =>

@@ -33,9 +33,9 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown, Ban, Search, Check } from "lucide-react";
-import { type TicketStatus, type Ticket } from "@/lib/mock-data";
+import { type TicketStatus, type Ticket, isWarranty } from "@/lib/mock-data";
 import { useStoreSettings } from "@/lib/store-settings";
-import { resolveStatus, statusGroups } from "@/lib/ticket-status-config";
+import { resolveStatus, statusGroups, effectiveColors, type StatusScope } from "@/lib/ticket-status-config";
 import { ModalPortal, Z } from "@/components/ui/modal-portal";
 import { cn } from "@/lib/utils";
 
@@ -65,7 +65,11 @@ export function StatusPillDropdown({
   size = "md",
   ariaLabel,
   fill = false,
+  scope = "ticket",
 }: {
+  /** Which status layout to use: tickets (default) or warranty records, each
+   *  configured separately in Settings → Tickets. */
+  scope?: StatusScope;
   /** Table mode: the pill fills its column (stable width, label truncates,
    *  chevron pinned right) — the RepairOX table-pill standard. */
   fill?: boolean;
@@ -79,7 +83,9 @@ export function StatusPillDropdown({
   ariaLabel?: string;
 }) {
   const { settings } = useStoreSettings();
-  const config = settings.ticketStatusConfig;
+  const config = scope === "warranty" ? settings.warrantyStatusConfig : settings.ticketStatusConfig;
+  // Warranty can recolour system statuses on its own; tickets keep the shared palette.
+  statusColors = scope === "warranty" ? effectiveColors(config, statusColors) : statusColors;
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [pos, setPos] = useState<{ top: number; left: number; dropUp: boolean }>({ top: 0, left: 0, dropUp: false });
@@ -252,6 +258,7 @@ export function InlineStatusDropdown({
       hasInvoice={hasInvoice}
       size="md"
       fill={fill}
+      scope={isWarranty(ticket) ? "warranty" : "ticket"}
     />
   );
 }

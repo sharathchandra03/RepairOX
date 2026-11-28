@@ -1862,3 +1862,19 @@ html :where(input, textarea):where(:placeholder-shown) {
   .lg-drift-a, .lg-drift-b, .lg-ping, .lg-phone, .lg-shimmer-text, .lg-sweep:hover::after { animation: none; }
   .lg-shimmer-text { color: #D5DCFF; background: none; -webkit-text-fill-color: #D5DCFF; }
 }
+
+/* Login: keep inputs white when the browser autofills (Chrome paints them pale blue) */
+.lg-form input:-webkit-autofill,
+.lg-form input:-webkit-autofill:hover,
+.lg-form input:-webkit-autofill:focus,
+.lg-form input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #ffffff inset !important;
+  box-shadow: 0 0 0 1000px #ffffff inset !important;
+  -webkit-text-fill-color: hsl(var(--foreground)) !important;
+  caret-color: hsl(var(--foreground));
+  transition: background-color 9999s ease-out 0s;
+}
+
+/* Empty-value cells ("—", "-", "N/A") are centred in their column (see EmptyCellAligner). */
+td[data-empty-cell] { text-align: center; }
+td[data-empty-pill] > * { margin-left: auto !important; margin-right: auto !important; width: fit-content; max-width: 100%; }

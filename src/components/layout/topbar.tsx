@@ -162,7 +162,7 @@ export function Topbar({
         {/* Store context selector — shows the current store / All Shops and
             lets authorized users switch. Sits beside the module switcher so the
             two context selectors read together (see design reference). */}
-        <div className="relative left-3 shrink-0 empty:hidden">
+        <div className="relative left-[18px] shrink-0 empty:hidden">
           <StoreSelector />
         </div>
 

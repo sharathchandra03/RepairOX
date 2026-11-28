@@ -3,15 +3,17 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { useStore } from "@/lib/store";
 import type { Ticket, TicketStatus } from "@/lib/mock-data";
-import type { Invoice, InvoiceStatus } from "@/lib/mock-data";
+import type { Invoice, InvoiceStatus, WalkIn, WalkInStatus } from "@/lib/mock-data";
+import { walkInDisplayId } from "@/lib/walk-in-data";
 
 /* ─── Search Scope ───────────────────────────────────────────────────── */
 
-export type SearchScope = "tickets" | "invoices" | "settings";
+export type SearchScope = "tickets" | "walkins" | "invoices" | "settings";
 
 export const SEARCH_SCOPES: { id: SearchScope; label: string }[] = [
   { id: "tickets", label: "Tickets" },
   { id: "invoices", label: "Invoices" },
+  { id: "walkins", label: "Walk-Ins" },
   { id: "settings", label: "Settings" },
 ];
 
@@ -34,6 +36,20 @@ export type TicketResult = {
   href: string;
 };
 
+export type WalkInResult = {
+  type: "walkin";
+  id: string;
+  /** Human-readable walk-in number (WK-001). `id` stays the routing key. */
+  displayId: string;
+  customer: string;
+  phone: string;
+  model: string;
+  issue: string;
+  source: string;
+  status: WalkInStatus;
+  date: string;
+  href: string;
+};
 export type InvoiceResult = {
   type: "invoice";
   id: string;
@@ -57,7 +73,7 @@ export type SettingsResult = {
   href: string;
 };
 
-export type SearchResult = TicketResult | InvoiceResult | SettingsResult;
+export type SearchResult = TicketResult | WalkInResult | InvoiceResult | SettingsResult;
 
 /* ─── Settings Data ──────────────────────────────────────────────────── */
 
@@ -168,6 +184,42 @@ function searchTickets(tickets: Ticket[], query: string): TicketResult[] {
   return results;
 }
 
+function searchWalkIns(walkIns: WalkIn[], query: string): WalkInResult[] {
+  const q = query.toLowerCase();
+  const results: WalkInResult[] = [];
+  for (const w of walkIns) {
+    const displayId = walkInDisplayId(w);
+    const deviceInfo = w.devices
+      ?.map((d) => [d.model, d.brand, d.category, d.issue].filter(Boolean).join(" "))
+      .join(" ") || "";
+    const searchable = [
+      displayId, w.id, w.customer, w.phone, w.altPhone, w.email,
+      w.source, w.category, w.model, w.issue, (w.reasons || []).join(" "),
+      w.salesPersonName, w.status, w.customerComments, w.notes,
+      deviceInfo,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    if (searchable.includes(q)) {
+      results.push({
+        type: "walkin",
+        id: w.id,
+        displayId,
+        customer: w.customer,
+        phone: w.phone,
+        model: w.model,
+        issue: w.issue ?? "",
+        source: w.source,
+        status: w.status,
+        date: w.date,
+        href: `/walk-in`,
+      });
+    }
+    if (results.length >= 20) break;
+  }
+  return results;
+}
 function searchInvoices(invoices: Invoice[], query: string, tickets: Ticket[]): InvoiceResult[] {
   const q = query.toLowerCase();
   const results: InvoiceResult[] = [];
@@ -232,7 +284,7 @@ function searchSettings(query: string): SettingsResult[] {
 /* ─── Hook ───────────────────────────────────────────────────────────── */
 
 export function useUniversalSearch() {
-  const { tickets, invoices } = useStore();
+  const { tickets, invoices, walkIns } = useStore();
   const [scope, setScope] = useState<SearchScope>("tickets");
   const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -266,6 +318,8 @@ export function useUniversalSearch() {
     switch (scope) {
       case "tickets":
         return searchTickets(tickets, debouncedQuery);
+      case "walkins":
+        return searchWalkIns(walkIns, debouncedQuery);
       case "invoices":
         return searchInvoices(invoices, debouncedQuery, tickets);
       case "settings":
@@ -273,7 +327,7 @@ export function useUniversalSearch() {
       default:
         return [];
     }
-  }, [scope, debouncedQuery, tickets, invoices]);
+  }, [scope, debouncedQuery, tickets, invoices, walkIns]);
 
   const resetSearch = useCallback(() => {
     setQuery("");
